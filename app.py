@@ -1,10 +1,10 @@
 import streamlit as st
-from databricks.sdk import WorkspaceClient, AccountClient
+
+from databricks.sdk import WorkspaceClient
+
 from datetime import datetime, timezone, timedelta
+
 import pandas as pd
-import json
-import os
-from io import StringIO
 
 
 # =========================================================
@@ -19,7 +19,45 @@ st.set_page_config(
 
 
 # =========================================================
-# DATABRICKS WORKSPACE CLIENT
+# CONFIGURATION
+# =========================================================
+
+# ---------------------------------------------------------
+# DBU PRICE
+# ---------------------------------------------------------
+#
+# This is intentionally NOT shown as a UI filter.
+#
+# Change this value according to your applicable DBU price.
+#
+# Example:
+# $0.15 per DBU
+# ---------------------------------------------------------
+
+DBU_PRICE = 0.15
+
+
+# ---------------------------------------------------------
+# DBU USAGE RANGE
+# ---------------------------------------------------------
+#
+# Automatically use the last 30 days.
+#
+# No UI filter is displayed.
+# ---------------------------------------------------------
+
+USAGE_END_DATE = datetime.now(
+    timezone.utc
+).date()
+
+USAGE_START_DATE = (
+    USAGE_END_DATE -
+    timedelta(days=30)
+)
+
+
+# =========================================================
+# DATABRICKS CLIENT
 # =========================================================
 
 @st.cache_resource
@@ -41,72 +79,6 @@ except Exception as e:
     st.exception(e)
 
     st.stop()
-
-
-# =========================================================
-# DATABRICKS ACCOUNT CLIENT
-# =========================================================
-
-@st.cache_resource
-def get_account_client():
-
-    try:
-
-        account_id = (
-            st.secrets.get(
-                "DATABRICKS_ACCOUNT_ID",
-                os.getenv("DATABRICKS_ACCOUNT_ID")
-            )
-        )
-
-        if account_id:
-
-            return AccountClient(
-                account_id=account_id
-            )
-
-        return AccountClient()
-
-    except Exception as e:
-
-        st.warning(
-            "Databricks Account API client could not be initialized."
-        )
-
-        st.caption(
-            str(e)
-        )
-
-        return None
-
-
-account_client = get_account_client()
-
-
-# =========================================================
-# DBU PRICE
-# =========================================================
-#
-# Replace this value with your actual DBU price.
-#
-# This is intentionally NOT shown as a Streamlit filter.
-# =========================================================
-
-try:
-
-    DBU_PRICE = float(
-        st.secrets.get(
-            "DBU_PRICE",
-            os.getenv(
-                "DBU_PRICE",
-                "0.15"
-            )
-        )
-    )
-
-except Exception:
-
-    DBU_PRICE = 0.15
 
 
 # =========================================================
@@ -158,7 +130,10 @@ def get_job_name(job):
 
     try:
 
-        if job.settings and job.settings.name:
+        if (
+            job.settings
+            and job.settings.name
+        ):
 
             return job.settings.name
 
@@ -310,321 +285,91 @@ def get_job_runs(job_id):
 
 
 # =========================================================
-# GET BILLABLE USAGE FROM ACCOUNT API
+# GET DBU USAGE FROM SYSTEM TABLE
+# =========================================================
+#
+# This is the same approach that was confirmed working
+# in your Databricks notebook.
+#
+# system.billing.usage
+#
+# usage_metadata.job_id
+# usage_quantity
+# usage_unit = 'DBU'
+#
 # =========================================================
 
 @st.cache_data(ttl=300)
-def get_billable_usage():
+def get_job_dbu_usage():
 
-    if account_client is None:
-
-        return pd.DataFrame()
-
-    # -----------------------------------------------------
-    # Automatically use last 30 days
-    # -----------------------------------------------------
-
-    end_date = (
-        datetime.now(
-            timezone.utc
-        ).date()
-    )
-
-    start_date = (
-        end_date -
-        timedelta(days=30)
-    )
-
-    # Account API works at month level.
-    # Therefore calculate the first and last month.
-    start_month = start_date.strftime(
-        "%Y-%m"
-    )
-
-    end_month = end_date.strftime(
-        "%Y-%m"
-    )
+    query = f"""
+    SELECT
+        usage_metadata.job_id AS job_id,
+        SUM(usage_quantity) AS dbu_usage
+    FROM system.billing.usage
+    WHERE usage_date >= DATE('{USAGE_START_DATE}')
+      AND usage_date <= DATE('{USAGE_END_DATE}')
+      AND usage_unit = 'DBU'
+      AND usage_metadata.job_id IS NOT NULL
+    GROUP BY usage_metadata.job_id
+    ORDER BY dbu_usage DESC
+    """
 
     try:
 
-        response = (
-            account_client
-            .billable_usage
-            .download(
-                start_month=start_month,
-                end_month=end_month,
-                personal_data=False
+        # -------------------------------------------------
+        # Use the Databricks SQL endpoint available to
+        # the application context.
+        # -------------------------------------------------
+
+        df = spark.sql(
+            query
+        ).toPandas()
+
+        if df.empty:
+
+            return pd.DataFrame(
+                columns=[
+                    "job_id",
+                    "dbu_usage"
+                ]
             )
+
+        # -------------------------------------------------
+        # Normalize Job ID
+        # -------------------------------------------------
+
+        df["job_id"] = (
+            df["job_id"]
+            .astype(str)
         )
 
         # -------------------------------------------------
-        # Convert API response to text
+        # Normalize DBU
         # -------------------------------------------------
 
-        if response is None:
-
-            return pd.DataFrame()
-
-        if hasattr(
-            response,
-            "read"
-        ):
-
-            content = response.read()
-
-        else:
-
-            content = response
-
-        if isinstance(
-            content,
-            bytes
-        ):
-
-            content = content.decode(
-                "utf-8"
-            )
-
-        # -------------------------------------------------
-        # Read CSV
-        # -------------------------------------------------
-
-        df = pd.read_csv(
-            StringIO(
-                content
-            )
-        )
-
-        # -------------------------------------------------
-        # Filter exact last-30-day range
-        # -------------------------------------------------
-
-        if "usage_date" in df.columns:
-
-            df["usage_date"] = pd.to_datetime(
-                df["usage_date"],
-                errors="coerce"
-            ).dt.date
-
-            df = df[
-                (
-                    df["usage_date"]
-                    >= start_date
-                )
-                &
-                (
-                    df["usage_date"]
-                    <= end_date
-                )
-            ]
+        df["dbu_usage"] = pd.to_numeric(
+            df["dbu_usage"],
+            errors="coerce"
+        ).fillna(0.0)
 
         return df
 
     except Exception as e:
 
         st.error(
-            "Unable to retrieve Databricks billable usage "
-            "from the Account API."
+            "Unable to retrieve DBU usage "
+            "from system.billing.usage."
         )
 
         st.exception(e)
 
-        return pd.DataFrame()
-
-
-# =========================================================
-# EXTRACT JOB ID FROM USAGE METADATA
-# =========================================================
-
-def extract_job_id(value):
-
-    if value is None:
-
-        return None
-
-    # -----------------------------------------------------
-    # Already a dictionary
-    # -----------------------------------------------------
-
-    if isinstance(
-        value,
-        dict
-    ):
-
-        return (
-            value.get("job_id")
-            or
-            value.get("jobId")
+        return pd.DataFrame(
+            columns=[
+                "job_id",
+                "dbu_usage"
+            ]
         )
-
-    # -----------------------------------------------------
-    # JSON string
-    # -----------------------------------------------------
-
-    if isinstance(
-        value,
-        str
-    ):
-
-        value = value.strip()
-
-        if not value:
-
-            return None
-
-        try:
-
-            parsed = json.loads(
-                value
-            )
-
-            if isinstance(
-                parsed,
-                dict
-            ):
-
-                return (
-                    parsed.get("job_id")
-                    or
-                    parsed.get("jobId")
-                )
-
-        except Exception:
-
-            pass
-
-        # -------------------------------------------------
-        # Fallback for strings containing job_id
-        # -------------------------------------------------
-
-        if "job_id" in value:
-
-            try:
-
-                parts = value.split(
-                    "job_id"
-                )
-
-                if len(parts) > 1:
-
-                    job_value = (
-                        parts[1]
-                        .replace(
-                            ":",
-                            ""
-                        )
-                        .replace(
-                            "\"",
-                            ""
-                        )
-                        .replace(
-                            "'",
-                            ""
-                        )
-                        .replace(
-                            "{",
-                            ""
-                        )
-                        .replace(
-                            "}",
-                            ""
-                        )
-                        .strip()
-                    )
-
-                    return job_value
-
-            except Exception:
-
-                pass
-
-    return None
-
-
-# =========================================================
-# CALCULATE DBU BY JOB
-# =========================================================
-
-def get_job_dbu_usage(
-    usage_df,
-    job_id
-):
-
-    if usage_df.empty:
-
-        return 0.0
-
-    if "usage_quantity" not in usage_df.columns:
-
-        return 0.0
-
-    if "usage_metadata" not in usage_df.columns:
-
-        return 0.0
-
-    total_dbu = 0.0
-
-    for _, row in usage_df.iterrows():
-
-        try:
-
-            usage_job_id = extract_job_id(
-                row.get(
-                    "usage_metadata"
-                )
-            )
-
-            if usage_job_id is None:
-
-                continue
-
-            if str(
-                usage_job_id
-            ) != str(job_id):
-
-                continue
-
-            # -------------------------------------------------
-            # Only DBU records
-            # -------------------------------------------------
-
-            if "usage_unit" in usage_df.columns:
-
-                usage_unit = str(
-                    row.get(
-                        "usage_unit",
-                        ""
-                    )
-                ).upper()
-
-                if usage_unit != "DBU":
-
-                    continue
-
-            # -------------------------------------------------
-            # Add usage
-            # -------------------------------------------------
-
-            usage_quantity = row.get(
-                "usage_quantity",
-                0
-            )
-
-            if pd.isna(
-                usage_quantity
-            ):
-
-                continue
-
-            total_dbu += float(
-                usage_quantity
-            )
-
-        except Exception:
-
-            continue
-
-    return total_dbu
 
 
 # =========================================================
@@ -648,16 +393,43 @@ if not jobs:
 
 
 # =========================================================
-# LOAD BILLABLE USAGE
+# LOAD JOB DBU DATA
 # =========================================================
 
 with st.spinner(
-    "Loading Databricks billable usage..."
+    "Loading Databricks job DBU usage..."
 ):
 
-    billable_usage_df = (
-        get_billable_usage()
-    )
+    job_dbu_df = get_job_dbu_usage()
+
+
+# =========================================================
+# CREATE DBU LOOKUP
+# =========================================================
+
+dbu_lookup = {}
+
+if not job_dbu_df.empty:
+
+    for _, row in job_dbu_df.iterrows():
+
+        try:
+
+            job_id = str(
+                row["job_id"]
+            )
+
+            dbu_value = float(
+                row["dbu_usage"]
+            )
+
+            dbu_lookup[
+                job_id
+            ] = dbu_value
+
+        except Exception:
+
+            continue
 
 
 # =========================================================
@@ -675,12 +447,23 @@ st.caption(
 
 
 # =========================================================
+# DBU DATE INFORMATION
+# =========================================================
+
+st.caption(
+    f"DBU usage period: "
+    f"{USAGE_START_DATE} → {USAGE_END_DATE}"
+)
+
+
+# =========================================================
 # REFRESH BUTTON
 # =========================================================
 
 refresh_col1, refresh_col2 = st.columns(
     [8, 1]
 )
+
 
 with refresh_col2:
 
@@ -724,7 +507,7 @@ with filter_col1:
 
 
 # =========================================================
-# JOB NAME MULTISELECT FILTER
+# JOB NAME FILTER
 # =========================================================
 
 job_names = sorted(
@@ -747,7 +530,7 @@ with filter_col2:
 
 
 # =========================================================
-# USER FILTER
+# CREATED BY FILTER
 # =========================================================
 
 users = sorted(
@@ -782,14 +565,14 @@ filtered_jobs = jobs.copy()
 
 if selected_workspace != "All Workspaces":
 
-    # Currently all jobs are from the App's workspace.
-    # Kept for future multi-workspace support.
+    # Currently all jobs are from the current
+    # Databricks workspace.
 
     filtered_jobs = filtered_jobs
 
 
 # ---------------------------------------------------------
-# JOB FILTER
+# JOB NAME FILTER
 # ---------------------------------------------------------
 
 if selected_jobs:
@@ -803,7 +586,7 @@ if selected_jobs:
 
 
 # ---------------------------------------------------------
-# USER FILTER
+# CREATED BY FILTER
 # ---------------------------------------------------------
 
 if selected_user != "All Users":
@@ -828,31 +611,36 @@ st.info(
 
 # =========================================================
 # TABLE 1
-# JOB INFORMATION
+# JOB INFORMATION + DBU + COST
 # =========================================================
 
 st.subheader(
     "1️⃣ Job Information"
 )
 
+
 job_information = []
 
 
 for job in filtered_jobs:
 
-    job_id = job["job_id"]
-
-    # -----------------------------------------------------
-    # DBU USAGE
-    # -----------------------------------------------------
-
-    job_dbu = get_job_dbu_usage(
-        billable_usage_df,
-        job_id
+    job_id = str(
+        job["job_id"]
     )
 
+
     # -----------------------------------------------------
-    # ESTIMATED COST
+    # GET DBU
+    # -----------------------------------------------------
+
+    job_dbu = dbu_lookup.get(
+        job_id,
+        0.0
+    )
+
+
+    # -----------------------------------------------------
+    # CALCULATE COST
     # -----------------------------------------------------
 
     estimated_cost = (
@@ -860,8 +648,9 @@ for job in filtered_jobs:
         DBU_PRICE
     )
 
+
     # -----------------------------------------------------
-    # ADD JOB INFORMATION
+    # ADD ROW
     # -----------------------------------------------------
 
     job_information.append(
@@ -873,7 +662,7 @@ for job in filtered_jobs:
                 job["job_name"],
 
             "Job ID":
-                job_id,
+                job["job_id"],
 
             "Created Date":
                 job["created_time"],
@@ -905,10 +694,27 @@ for job in filtered_jobs:
 
 if job_information:
 
+    job_information_df = pd.DataFrame(
+        job_information
+    )
+
     st.dataframe(
-        job_information,
+        job_information_df,
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        column_config={
+            "DBU Usage":
+                st.column_config.NumberColumn(
+                    "DBU Usage",
+                    format="%.4f"
+                ),
+
+            "Estimated Cost (USD)":
+                st.column_config.NumberColumn(
+                    "Estimated Cost (USD)",
+                    format="$%.2f"
+                )
+        }
     )
 
 else:
@@ -927,6 +733,7 @@ st.subheader(
     "2️⃣ Job Run Summary"
 )
 
+
 run_summary = []
 
 
@@ -936,6 +743,7 @@ for job in filtered_jobs:
 
     job_name = job["job_name"]
 
+
     # -----------------------------------------------------
     # GET RUNS
     # -----------------------------------------------------
@@ -943,6 +751,7 @@ for job in filtered_jobs:
     runs = get_job_runs(
         job_id
     )
+
 
     # -----------------------------------------------------
     # TOTAL RUNS
@@ -952,6 +761,7 @@ for job in filtered_jobs:
         runs
     )
 
+
     # -----------------------------------------------------
     # COUNTERS
     # -----------------------------------------------------
@@ -959,6 +769,7 @@ for job in filtered_jobs:
     success_runs = 0
 
     failed_runs = 0
+
 
     # -----------------------------------------------------
     # PROCESS RUNS
@@ -972,6 +783,7 @@ for job in filtered_jobs:
 
         status = status.upper()
 
+
         # -------------------------------------------------
         # SUCCESS
         # -------------------------------------------------
@@ -982,6 +794,7 @@ for job in filtered_jobs:
         ]:
 
             success_runs += 1
+
 
         # -------------------------------------------------
         # FAILURE
@@ -995,6 +808,7 @@ for job in filtered_jobs:
 
             failed_runs += 1
 
+
     # -----------------------------------------------------
     # SUCCESS RATIO
     # -----------------------------------------------------
@@ -1003,6 +817,7 @@ for job in filtered_jobs:
         success_runs +
         failed_runs
     )
+
 
     if completed_runs > 0:
 
@@ -1014,6 +829,7 @@ for job in filtered_jobs:
     else:
 
         success_ratio = 0
+
 
     # -----------------------------------------------------
     # ADD ROW
@@ -1045,8 +861,12 @@ for job in filtered_jobs:
 
 if run_summary:
 
+    run_summary_df = pd.DataFrame(
+        run_summary
+    )
+
     st.dataframe(
-        run_summary,
+        run_summary_df,
         use_container_width=True,
         hide_index=True
     )
@@ -1054,7 +874,8 @@ if run_summary:
 else:
 
     st.warning(
-        "No job run data available for the selected filters."
+        "No job run data available "
+        "for the selected filters."
     )
 
 
