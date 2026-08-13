@@ -309,9 +309,10 @@ job_names = sorted(
 
 with filter_col2:
 
-    selected_job = st.selectbox(
+    selected_jobs = st.multiselect(
         "Job Name",
-        ["All Jobs"] + job_names
+        options=job_names,
+        placeholder="Select one or more jobs"
     )
 
 
