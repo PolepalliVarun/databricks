@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 
 # =========================================================
-# Page Configuration
+# PAGE CONFIGURATION
 # =========================================================
 
 st.set_page_config(
@@ -15,7 +15,7 @@ st.set_page_config(
 
 
 # =========================================================
-# Databricks Client
+# DATABRICKS CLIENT
 # =========================================================
 
 @st.cache_resource
@@ -27,29 +27,26 @@ try:
     w = get_databricks_client()
 
 except Exception as e:
-
     st.error("Unable to create Databricks client.")
     st.exception(e)
     st.stop()
 
 
 # =========================================================
-# Authentication Check
+# AUTHENTICATION
 # =========================================================
 
 try:
-
     current_user = w.current_user.me()
 
 except Exception as e:
-
     st.error("Databricks authentication failed.")
     st.exception(e)
     st.stop()
 
 
 # =========================================================
-# Helper Functions
+# HELPER FUNCTIONS
 # =========================================================
 
 def format_timestamp(timestamp):
@@ -58,7 +55,6 @@ def format_timestamp(timestamp):
         return "-"
 
     try:
-
         dt = datetime.fromtimestamp(
             timestamp / 1000,
             tz=timezone.utc
@@ -67,19 +63,24 @@ def format_timestamp(timestamp):
         return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
     except Exception:
-
         return "-"
+
+
+def get_job_name(job):
+
+    try:
+        if job.settings and job.settings.name:
+            return job.settings.name
+
+    except Exception:
+        pass
+
+    return f"Job {job.job_id}"
 
 
 def get_job_created_time(job):
 
-    """
-    Databricks job creation time can be available
-    through job settings metadata depending on API version.
-    """
-
     try:
-
         if job.created_time:
             return format_timestamp(job.created_time)
 
@@ -92,7 +93,6 @@ def get_job_created_time(job):
 def get_job_updated_time(job):
 
     try:
-
         if job.change_time:
             return format_timestamp(job.change_time)
 
@@ -102,10 +102,9 @@ def get_job_updated_time(job):
     return "-"
 
 
-def get_creator(job):
+def get_job_creator(job):
 
     try:
-
         if job.creator_user_name:
             return job.creator_user_name
 
@@ -115,30 +114,20 @@ def get_creator(job):
     return "-"
 
 
-def get_job_name(job):
-
-    try:
-
-        if job.settings and job.settings.name:
-            return job.settings.name
-
-    except Exception:
-        pass
-
-    return f"Job {job.job_id}"
-
-
 def get_run_status(run):
+
+    """
+    Returns the final result state when available.
+    Otherwise returns the current lifecycle state.
+    """
 
     if not run.state:
         return "UNKNOWN"
 
-    # Result state takes priority
     if run.state.result_state:
 
         return run.state.result_state.value
 
-    # Otherwise lifecycle state
     if run.state.life_cycle_state:
 
         return run.state.life_cycle_state.value
@@ -147,7 +136,7 @@ def get_run_status(run):
 
 
 # =========================================================
-# Get Jobs
+# GET JOBS
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -162,16 +151,13 @@ def get_jobs():
             if job.job_id is None:
                 continue
 
-            job_name = get_job_name(job)
-
             jobs.append(
                 {
                     "job_id": job.job_id,
-                    "job_name": job_name,
+                    "job_name": get_job_name(job),
                     "created_time": get_job_created_time(job),
                     "updated_time": get_job_updated_time(job),
-                    "created_by": get_creator(job),
-                    "job": job
+                    "created_by": get_job_creator(job)
                 }
             )
 
@@ -184,32 +170,44 @@ def get_jobs():
 
 
 # =========================================================
-# Get Job Runs
+# GET ALL RUNS FOR A JOB
 # =========================================================
 
 @st.cache_data(ttl=60)
 def get_job_runs(job_id):
 
-    runs = []
+    all_runs = []
 
     try:
 
+        # -------------------------------------------------
+        # First request
+        # -------------------------------------------------
+
         response = w.jobs.list_runs(
             job_id=job_id,
-            limit=100
+            limit=100,
+            expand_tasks=False
         )
 
         for run in response:
+            all_runs.append(run)
 
-            status = get_run_status(run)
 
-            runs.append(
-                {
-                    "run_id": run.run_id,
-                    "status": status,
-                    "run": run
-                }
-            )
+        # -------------------------------------------------
+        # Pagination
+        # -------------------------------------------------
+
+        while response.has_next_page():
+
+            response = response.next_page()
+
+            for run in response:
+                all_runs.append(run)
+
+
+        return all_runs
+
 
     except Exception as e:
 
@@ -217,42 +215,44 @@ def get_job_runs(job_id):
             f"Unable to retrieve runs for Job ID {job_id}"
         )
 
+        st.error(
+            f"Error Type: {type(e).__name__}"
+        )
+
         st.exception(e)
 
-    return runs
+        return []
 
 
 # =========================================================
-# Get Workspace Information
+# GET WORKSPACE NAME
 # =========================================================
 
 def get_workspace_name():
 
     """
-    Attempts to get the workspace name.
+    Databricks Apps run inside the current workspace.
 
-    Databricks Apps generally run against the workspace
-    in which the App is deployed.
+    If the workspace name is not exposed through the SDK,
+    this fallback name is used.
     """
 
     try:
 
-        # Try workspace status information
-        workspace_status = w.workspace.get_status()
+        # Try to get workspace information
+        status = w.workspace.get_status()
 
-        if workspace_status:
-
+        if status:
             return "Databricks Workspace"
 
     except Exception:
-
         pass
 
     return "Databricks Workspace"
 
 
 # =========================================================
-# Load Jobs
+# LOAD JOBS
 # =========================================================
 
 jobs = get_jobs()
@@ -265,15 +265,15 @@ if not jobs:
     )
 
     st.info(
-        "Make sure the App service principal has "
-        "Can View permission on the required jobs."
+        "Make sure the Databricks App service principal "
+        "has Can View permission on the required jobs."
     )
 
     st.stop()
 
 
 # =========================================================
-# Header
+# HEADER
 # =========================================================
 
 st.title("📊 Databricks Job Monitor")
@@ -284,12 +284,14 @@ st.caption(
 
 
 # =========================================================
-# Refresh Button
+# REFRESH
 # =========================================================
 
-col1, col2 = st.columns([8, 1])
+refresh_col1, refresh_col2 = st.columns(
+    [8, 1]
+)
 
-with col2:
+with refresh_col2:
 
     if st.button("🔄 Refresh"):
 
@@ -299,7 +301,7 @@ with col2:
 
 
 # =========================================================
-# Workspace Name
+# WORKSPACE
 # =========================================================
 
 workspace_name = get_workspace_name()
@@ -307,7 +309,7 @@ workspace_name = get_workspace_name()
 
 # =========================================================
 # TABLE 1
-# Job Information
+# JOB INFORMATION
 # =========================================================
 
 st.subheader("1️⃣ Job Information")
@@ -339,7 +341,7 @@ st.dataframe(
 
 # =========================================================
 # TABLE 2
-# Job Run Summary
+# JOB RUN SUMMARY
 # =========================================================
 
 st.subheader("2️⃣ Job Run Summary")
@@ -353,36 +355,79 @@ for job in jobs:
     job_id = job["job_id"]
     job_name = job["job_name"]
 
+
+    # -----------------------------------------------------
+    # Get runs
+    # -----------------------------------------------------
+
     runs = get_job_runs(job_id)
+
+
+    # -----------------------------------------------------
+    # Count runs
+    # -----------------------------------------------------
 
     total_runs = len(runs)
 
-    success_runs = sum(
-        1
-        for run in runs
-        if run["status"] == "SUCCESS"
-    )
+    success_runs = 0
 
-    failed_runs = sum(
-        1
-        for run in runs
-        if run["status"] in [
+    failed_runs = 0
+
+
+    for run in runs:
+
+        status = get_run_status(run)
+
+        status = status.upper()
+
+
+        # Successful runs
+        if status in [
+            "SUCCESS",
+            "SUCCEEDED"
+        ]:
+
+            success_runs += 1
+
+
+        # Failed runs
+        elif status in [
             "FAILED",
-            "TIMED_OUT",
-            "ERROR"
-        ]
+            "ERROR",
+            "TIMED_OUT"
+        ]:
+
+            failed_runs += 1
+
+
+    # -----------------------------------------------------
+    # Success ratio
+    #
+    # Running / pending runs are not included in the
+    # denominator.
+    # -----------------------------------------------------
+
+    completed_runs = (
+        success_runs +
+        failed_runs
     )
 
-    if total_runs > 0:
+
+    if completed_runs > 0:
 
         success_ratio = (
-            success_runs / total_runs
+            success_runs /
+            completed_runs
         ) * 100
 
     else:
 
         success_ratio = 0
 
+
+    # -----------------------------------------------------
+    # Add row
+    # -----------------------------------------------------
 
     run_summary.append(
         {
@@ -395,6 +440,10 @@ for job in jobs:
     )
 
 
+# =========================================================
+# DISPLAY TABLE 2
+# =========================================================
+
 st.dataframe(
     run_summary,
     use_container_width=True,
@@ -403,11 +452,70 @@ st.dataframe(
 
 
 # =========================================================
-# Footer
+# SUMMARY METRICS
+# =========================================================
+
+st.divider()
+
+total_jobs = len(jobs)
+
+total_runs_all = sum(
+    row["Total Runs"]
+    for row in run_summary
+)
+
+total_success_all = sum(
+    row["Success Runs"]
+    for row in run_summary
+)
+
+total_failed_all = sum(
+    row["Failed Runs"]
+    for row in run_summary
+)
+
+
+metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+
+
+with metric_col1:
+
+    st.metric(
+        "Total Jobs",
+        total_jobs
+    )
+
+
+with metric_col2:
+
+    st.metric(
+        "Total Runs",
+        total_runs_all
+    )
+
+
+with metric_col3:
+
+    st.metric(
+        "Successful Runs",
+        total_success_all
+    )
+
+
+with metric_col4:
+
+    st.metric(
+        "Failed Runs",
+        total_failed_all
+    )
+
+
+# =========================================================
+# FOOTER
 # =========================================================
 
 st.divider()
 
 st.caption(
-    "Databricks Job Monitor"
+    "Databricks Job Monitor | Powered by Databricks SDK"
 )
