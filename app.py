@@ -1,17 +1,18 @@
-import os
 import streamlit as st
 
-st.title("Databricks App Debug")
+st.set_page_config(
+    page_title="Databricks Operations",
+    page_icon="📊",
+    layout="wide"
+)
 
-st.write("Current directory:")
-st.code(os.getcwd())
+st.title("📊 Databricks Operations Dashboard")
 
-st.write("Files in current directory:")
-st.write(os.listdir("."))
+st.success("Main application is running successfully.")
 
-st.write("Pages directory exists:")
-st.write(os.path.exists("pages"))
+st.markdown("""
+Use the **Pages** menu on the left to open:
 
-if os.path.exists("pages"):
-    st.write("Files inside pages:")
-    st.write(os.listdir("pages"))
+- 📊 Job Monitor
+- 📘 App Context
+""")
