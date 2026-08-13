@@ -1,18 +1,52 @@
 import streamlit as st
 
+
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
+
 st.set_page_config(
-    page_title="Databricks Operations",
+    page_title="Databricks Operations Dashboard",
     page_icon="📊",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-st.title("📊 Databricks Operations Dashboard")
 
-st.success("Main application is running successfully.")
+# =========================================================
+# APPLICATION PAGES
+# =========================================================
 
-st.markdown("""
-Use the **Pages** menu on the left to open:
+job_monitor_page = st.Page(
+    "pages/Job_Monitor.py",
+    title="Job Monitor",
+    icon="📊",
+    default=True
+)
 
-- 📊 Job Monitor
-- 📘 App Context
-""")
+app_context_page = st.Page(
+    "pages/App_Context.py",
+    title="App Context",
+    icon="📘"
+)
+
+
+# =========================================================
+# NAVIGATION
+# =========================================================
+
+pg = st.navigation(
+    {
+        "Databricks Operations": [
+            job_monitor_page,
+            app_context_page
+        ]
+    }
+)
+
+
+# =========================================================
+# RUN SELECTED PAGE
+# =========================================================
+
+pg.run()
