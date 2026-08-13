@@ -500,60 +500,6 @@ with filter_col3:
     )
 
 
-# =========================================================
-# COST / DBU DATE RANGE
-# =========================================================
-
-st.subheader("💰 DBU & Cost Configuration")
-
-cost_col1, cost_col2, cost_col3 = st.columns(3)
-
-
-with cost_col1:
-
-    default_start_date = (
-        datetime.now(timezone.utc).date()
-        - timedelta(days=30)
-    )
-
-    usage_start_date = st.date_input(
-        "Usage Start Date",
-        value=default_start_date
-    )
-
-
-with cost_col2:
-
-    usage_end_date = st.date_input(
-        "Usage End Date",
-        value=datetime.now(timezone.utc).date()
-    )
-
-
-with cost_col3:
-
-    dbu_price = st.number_input(
-        "DBU Price (USD)",
-        min_value=0.0,
-        value=0.15,
-        step=0.01,
-        format="%.4f",
-        help="Enter the applicable DBU price for your workload."
-    )
-
-
-# =========================================================
-# VALIDATE DATE RANGE
-# =========================================================
-
-if usage_start_date > usage_end_date:
-
-    st.error(
-        "Usage Start Date cannot be greater than Usage End Date."
-    )
-
-    st.stop()
-
 
 # =========================================================
 # LOAD BILLABLE USAGE
