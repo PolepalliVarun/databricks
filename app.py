@@ -25,25 +25,18 @@ st.set_page_config(
 # ---------------------------------------------------------
 # DBU PRICE
 # ---------------------------------------------------------
-#
-# This is intentionally NOT shown as a UI filter.
-#
-# Change this value according to your applicable DBU price.
-#
-# Example:
-# $0.15 per DBU
+# This is intentionally NOT displayed as a UI filter.
+# Change this according to your applicable DBU price.
 # ---------------------------------------------------------
 
 DBU_PRICE = 0.15
 
 
 # ---------------------------------------------------------
-# DBU USAGE RANGE
+# DBU DATE RANGE
 # ---------------------------------------------------------
-#
 # Automatically use the last 30 days.
-#
-# No UI filter is displayed.
+# No DBU/cost date filters are displayed.
 # ---------------------------------------------------------
 
 USAGE_END_DATE = datetime.now(
@@ -285,22 +278,53 @@ def get_job_runs(job_id):
 
 
 # =========================================================
-# GET DBU USAGE FROM SYSTEM TABLE
+# GET DBU USAGE
 # =========================================================
 #
-# This is the same approach that was confirmed working
-# in your Databricks notebook.
+# Uses:
+#     system.billing.usage
 #
-# system.billing.usage
+# through:
+#     Databricks SQL Statement Execution API
 #
-# usage_metadata.job_id
-# usage_quantity
-# usage_unit = 'DBU'
+# Does NOT use spark.sql()
 #
 # =========================================================
 
 @st.cache_data(ttl=300)
 def get_job_dbu_usage():
+
+    # -----------------------------------------------------
+    # SQL Warehouse ID
+    # -----------------------------------------------------
+
+    warehouse_id = st.secrets.get(
+        "SQL_WAREHOUSE_ID",
+        None
+    )
+
+    if not warehouse_id:
+
+        st.error(
+            "SQL_WAREHOUSE_ID is not configured."
+        )
+
+        st.info(
+            "Add SQL_WAREHOUSE_ID to "
+            ".streamlit/secrets.toml"
+        )
+
+        return pd.DataFrame(
+            columns=[
+                "job_id",
+                "dbu_usage"
+            ]
+        )
+
+
+    # -----------------------------------------------------
+    # SQL QUERY
+    # -----------------------------------------------------
 
     query = f"""
     SELECT
@@ -315,18 +339,32 @@ def get_job_dbu_usage():
     ORDER BY dbu_usage DESC
     """
 
+
     try:
 
         # -------------------------------------------------
-        # Use the Databricks SQL endpoint available to
-        # the application context.
+        # Execute SQL using Statement Execution API
         # -------------------------------------------------
 
-        df = spark.sql(
-            query
-        ).toPandas()
+        response = (
+            w.statement_execution
+            .execute_statement(
+                warehouse_id=warehouse_id,
+                statement=query,
+                wait_timeout="50s"
+            )
+        )
 
-        if df.empty:
+
+        # -------------------------------------------------
+        # Check status
+        # -------------------------------------------------
+
+        if response.status is None:
+
+            st.error(
+                "SQL execution returned no status."
+            )
 
             return pd.DataFrame(
                 columns=[
@@ -335,25 +373,146 @@ def get_job_dbu_usage():
                 ]
             )
 
+
+        status = response.status.state.value
+
+
+        if status != "SUCCEEDED":
+
+            st.error(
+                f"DBU SQL query failed. "
+                f"Status: {status}"
+            )
+
+            try:
+
+                if response.status.error:
+
+                    st.code(
+                        str(
+                            response.status.error
+                        )
+                    )
+
+            except Exception:
+
+                pass
+
+            return pd.DataFrame(
+                columns=[
+                    "job_id",
+                    "dbu_usage"
+                ]
+            )
+
+
         # -------------------------------------------------
-        # Normalize Job ID
+        # Get result
+        # -------------------------------------------------
+
+        result = response.result
+
+
+        if result is None:
+
+            return pd.DataFrame(
+                columns=[
+                    "job_id",
+                    "dbu_usage"
+                ]
+            )
+
+
+        # -------------------------------------------------
+        # Extract rows
+        # -------------------------------------------------
+
+        rows = []
+
+
+        if result.data_array:
+
+            for row in result.data_array:
+
+                if len(row) < 2:
+
+                    continue
+
+
+                job_id = row[0]
+
+                dbu_value = row[1]
+
+
+                if job_id is None:
+
+                    continue
+
+
+                try:
+
+                    dbu_value = float(
+                        dbu_value
+                    )
+
+                except Exception:
+
+                    dbu_value = 0.0
+
+
+                rows.append(
+                    {
+                        "job_id":
+                            str(job_id),
+
+                        "dbu_usage":
+                            dbu_value
+                    }
+                )
+
+
+        # -------------------------------------------------
+        # No records
+        # -------------------------------------------------
+
+        if not rows:
+
+            return pd.DataFrame(
+                columns=[
+                    "job_id",
+                    "dbu_usage"
+                ]
+            )
+
+
+        # -------------------------------------------------
+        # DataFrame
+        # -------------------------------------------------
+
+        df = pd.DataFrame(
+            rows
+        )
+
+
+        # -------------------------------------------------
+        # Normalize
         # -------------------------------------------------
 
         df["job_id"] = (
             df["job_id"]
             .astype(str)
+            .str.strip()
         )
 
-        # -------------------------------------------------
-        # Normalize DBU
-        # -------------------------------------------------
 
         df["dbu_usage"] = pd.to_numeric(
             df["dbu_usage"],
             errors="coerce"
         ).fillna(0.0)
 
+
         return df
+
 
     except Exception as e:
 
@@ -393,7 +552,7 @@ if not jobs:
 
 
 # =========================================================
-# LOAD JOB DBU DATA
+# LOAD DBU DATA
 # =========================================================
 
 with st.spinner(
@@ -409,6 +568,7 @@ with st.spinner(
 
 dbu_lookup = {}
 
+
 if not job_dbu_df.empty:
 
     for _, row in job_dbu_df.iterrows():
@@ -417,7 +577,7 @@ if not job_dbu_df.empty:
 
             job_id = str(
                 row["job_id"]
-            )
+            ).strip()
 
             dbu_value = float(
                 row["dbu_usage"]
@@ -444,11 +604,6 @@ st.caption(
     f"Authenticated as: "
     f"{current_user.user_name}"
 )
-
-
-# =========================================================
-# DBU DATE INFORMATION
-# =========================================================
 
 st.caption(
     f"DBU usage period: "
@@ -483,6 +638,7 @@ with refresh_col2:
 st.subheader(
     "🔎 Filters"
 )
+
 
 filter_col1, filter_col2, filter_col3 = st.columns(
     3
@@ -565,8 +721,8 @@ filtered_jobs = jobs.copy()
 
 if selected_workspace != "All Workspaces":
 
-    # Currently all jobs are from the current
-    # Databricks workspace.
+    # Current implementation is for the
+    # connected workspace.
 
     filtered_jobs = filtered_jobs
 
@@ -626,11 +782,11 @@ for job in filtered_jobs:
 
     job_id = str(
         job["job_id"]
-    )
+    ).strip()
 
 
     # -----------------------------------------------------
-    # GET DBU
+    # DBU
     # -----------------------------------------------------
 
     job_dbu = dbu_lookup.get(
@@ -640,7 +796,7 @@ for job in filtered_jobs:
 
 
     # -----------------------------------------------------
-    # CALCULATE COST
+    # COST
     # -----------------------------------------------------
 
     estimated_cost = (
@@ -650,7 +806,7 @@ for job in filtered_jobs:
 
 
     # -----------------------------------------------------
-    # ADD ROW
+    # ROW
     # -----------------------------------------------------
 
     job_information.append(
@@ -698,11 +854,14 @@ if job_information:
         job_information
     )
 
+
     st.dataframe(
         job_information_df,
         use_container_width=True,
         hide_index=True,
+
         column_config={
+
             "DBU Usage":
                 st.column_config.NumberColumn(
                     "DBU Usage",
@@ -754,17 +913,12 @@ for job in filtered_jobs:
 
 
     # -----------------------------------------------------
-    # TOTAL RUNS
+    # COUNTERS
     # -----------------------------------------------------
 
     total_runs = len(
         runs
     )
-
-
-    # -----------------------------------------------------
-    # COUNTERS
-    # -----------------------------------------------------
 
     success_runs = 0
 
@@ -784,10 +938,6 @@ for job in filtered_jobs:
         status = status.upper()
 
 
-        # -------------------------------------------------
-        # SUCCESS
-        # -------------------------------------------------
-
         if status in [
             "SUCCESS",
             "SUCCEEDED"
@@ -795,10 +945,6 @@ for job in filtered_jobs:
 
             success_runs += 1
 
-
-        # -------------------------------------------------
-        # FAILURE
-        # -------------------------------------------------
 
         elif status in [
             "FAILED",
