@@ -1,6 +1,7 @@
 import streamlit as st
-from databricks.sdk import WorkspaceClient
-from datetime import datetime, timezone
+from databricks.sdk import WorkspaceClient, AccountClient
+from datetime import datetime, timezone, timedelta
+import pandas as pd
 
 
 # =========================================================
@@ -15,7 +16,7 @@ st.set_page_config(
 
 
 # =========================================================
-# DATABRICKS CLIENT
+# DATABRICKS WORKSPACE CLIENT
 # =========================================================
 
 @st.cache_resource
@@ -30,6 +31,23 @@ except Exception as e:
     st.error("Unable to create Databricks client.")
     st.exception(e)
     st.stop()
+
+
+# =========================================================
+# DATABRICKS ACCOUNT CLIENT
+# =========================================================
+
+@st.cache_resource
+def get_account_client():
+
+    try:
+        return AccountClient()
+
+    except Exception:
+        return None
+
+
+account_client = get_account_client()
 
 
 # =========================================================
@@ -209,6 +227,157 @@ def get_job_runs(job_id):
 
 
 # =========================================================
+# GET BILLABLE USAGE
+# =========================================================
+
+@st.cache_data(ttl=300)
+def get_billable_usage(
+    start_date,
+    end_date
+):
+
+    usage_data = []
+
+    if account_client is None:
+
+        return usage_data
+
+    try:
+
+        start_datetime = datetime.combine(
+            start_date,
+            datetime.min.time(),
+            tzinfo=timezone.utc
+        )
+
+        end_datetime = datetime.combine(
+            end_date,
+            datetime.max.time(),
+            tzinfo=timezone.utc
+        )
+
+        response = account_client.billable_usage.download(
+            start_month=start_datetime.strftime("%Y-%m"),
+            end_month=end_datetime.strftime("%Y-%m")
+        )
+
+        # Download API returns CSV/text data.
+        if response:
+
+            if hasattr(response, "read"):
+                content = response.read()
+            else:
+                content = response
+
+            if isinstance(content, bytes):
+                content = content.decode("utf-8")
+
+            from io import StringIO
+
+            df = pd.read_csv(
+                StringIO(content)
+            )
+
+            usage_data = df.to_dict(
+                orient="records"
+            )
+
+    except Exception as e:
+
+        st.warning(
+            "Unable to retrieve Databricks billable usage. "
+            "Check Account API permissions and authentication."
+        )
+
+        st.caption(str(e))
+
+    return usage_data
+
+
+# =========================================================
+# CALCULATE JOB DBU USAGE
+# =========================================================
+
+def calculate_job_dbu_usage(
+    usage_data,
+    job_id,
+    start_date,
+    end_date
+):
+
+    total_dbu = 0.0
+
+    if not usage_data:
+        return total_dbu
+
+    for row in usage_data:
+
+        try:
+
+            # -------------------------------------------------
+            # Extract job ID
+            # -------------------------------------------------
+
+            row_job_id = None
+
+            for key in [
+                "job_id",
+                "jobId",
+                "job_id.value"
+            ]:
+
+                if key in row:
+                    row_job_id = row[key]
+                    break
+
+            if row_job_id is None:
+                continue
+
+            # Handle values such as "12345"
+            # and "job-12345"
+            row_job_id_str = str(
+                row_job_id
+            ).replace(
+                "job-",
+                ""
+            ).strip()
+
+            if row_job_id_str != str(job_id):
+                continue
+
+            # -------------------------------------------------
+            # Extract DBU quantity
+            # -------------------------------------------------
+
+            dbu_value = None
+
+            for key in [
+                "usage_quantity",
+                "usage_quantity_dbu",
+                "dbu_usage",
+                "quantity"
+            ]:
+
+                if key in row:
+
+                    dbu_value = row[key]
+
+                    break
+
+            if dbu_value is None:
+                continue
+
+            total_dbu += float(
+                dbu_value
+            )
+
+        except Exception:
+            continue
+
+    return total_dbu
+
+
+# =========================================================
 # LOAD JOBS
 # =========================================================
 
@@ -332,6 +501,75 @@ with filter_col3:
 
 
 # =========================================================
+# COST / DBU DATE RANGE
+# =========================================================
+
+st.subheader("💰 DBU & Cost Configuration")
+
+cost_col1, cost_col2, cost_col3 = st.columns(3)
+
+
+with cost_col1:
+
+    default_start_date = (
+        datetime.now(timezone.utc).date()
+        - timedelta(days=30)
+    )
+
+    usage_start_date = st.date_input(
+        "Usage Start Date",
+        value=default_start_date
+    )
+
+
+with cost_col2:
+
+    usage_end_date = st.date_input(
+        "Usage End Date",
+        value=datetime.now(timezone.utc).date()
+    )
+
+
+with cost_col3:
+
+    dbu_price = st.number_input(
+        "DBU Price (USD)",
+        min_value=0.0,
+        value=0.15,
+        step=0.01,
+        format="%.4f",
+        help="Enter the applicable DBU price for your workload."
+    )
+
+
+# =========================================================
+# VALIDATE DATE RANGE
+# =========================================================
+
+if usage_start_date > usage_end_date:
+
+    st.error(
+        "Usage Start Date cannot be greater than Usage End Date."
+    )
+
+    st.stop()
+
+
+# =========================================================
+# LOAD BILLABLE USAGE
+# =========================================================
+
+with st.spinner(
+    "Loading Databricks billable usage..."
+):
+
+    billable_usage = get_billable_usage(
+        usage_start_date,
+        usage_end_date
+    )
+
+
+# =========================================================
 # APPLY FILTERS
 # =========================================================
 
@@ -401,6 +639,27 @@ job_information = []
 
 for job in filtered_jobs:
 
+    job_id = job["job_id"]
+
+    # -----------------------------------------------------
+    # Calculate DBU usage
+    # -----------------------------------------------------
+
+    job_dbu = calculate_job_dbu_usage(
+        billable_usage,
+        job_id,
+        usage_start_date,
+        usage_end_date
+    )
+
+    # -----------------------------------------------------
+    # Calculate estimated cost
+    # -----------------------------------------------------
+
+    estimated_cost = (
+        job_dbu * dbu_price
+    )
+
     job_information.append(
         {
             "Workspace Name":
@@ -410,7 +669,7 @@ for job in filtered_jobs:
                 job["job_name"],
 
             "Job ID":
-                job["job_id"],
+                job_id,
 
             "Created Date":
                 job["created_time"],
@@ -419,7 +678,13 @@ for job in filtered_jobs:
                 job["updated_time"],
 
             "Created By":
-                job["created_by"]
+                job["created_by"],
+
+            "DBU Usage":
+                round(job_dbu, 4),
+
+            "Estimated Cost (USD)":
+                round(estimated_cost, 2)
         }
     )
 
@@ -459,15 +724,26 @@ for job in filtered_jobs:
     job_name = job["job_name"]
 
 
+    # -----------------------------------------------------
     # Get runs
-    runs = get_job_runs(job_id)
+    # -----------------------------------------------------
+
+    runs = get_job_runs(
+        job_id
+    )
 
 
+    # -----------------------------------------------------
     # Total runs
+    # -----------------------------------------------------
+
     total_runs = len(runs)
 
 
+    # -----------------------------------------------------
     # Counters
+    # -----------------------------------------------------
+
     success_runs = 0
 
     failed_runs = 0
@@ -479,12 +755,17 @@ for job in filtered_jobs:
 
     for run in runs:
 
-        status = get_run_status(run)
+        status = get_run_status(
+            run
+        )
 
         status = status.upper()
 
 
+        # -------------------------------------------------
         # Successful runs
+        # -------------------------------------------------
+
         if status in [
             "SUCCESS",
             "SUCCEEDED"
@@ -493,7 +774,10 @@ for job in filtered_jobs:
             success_runs += 1
 
 
+        # -------------------------------------------------
         # Failed runs
+        # -------------------------------------------------
+
         elif status in [
             "FAILED",
             "ERROR",
@@ -575,7 +859,9 @@ else:
 st.divider()
 
 
-total_jobs = len(filtered_jobs)
+total_jobs = len(
+    filtered_jobs
+)
 
 
 total_runs = sum(
@@ -596,7 +882,23 @@ total_failed = sum(
 )
 
 
-col1, col2, col3, col4 = st.columns(4)
+# =========================================================
+# TOTAL DBU / COST
+# =========================================================
+
+total_dbu = sum(
+    row["DBU Usage"]
+    for row in job_information
+)
+
+
+total_cost = sum(
+    row["Estimated Cost (USD)"]
+    for row in job_information
+)
+
+
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 
 with col1:
@@ -631,11 +933,28 @@ with col4:
     )
 
 
+with col5:
+
+    st.metric(
+        "Total DBU",
+        f"{total_dbu:.4f}"
+    )
+
+
+with col6:
+
+    st.metric(
+        "Estimated Cost",
+        f"${total_cost:.2f}"
+    )
+
+
 # =========================================================
 # FOOTER
 # =========================================================
 
 st.divider()
+
 
 st.caption(
     "Databricks Job Monitor"
