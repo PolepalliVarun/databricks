@@ -77,7 +77,6 @@ def get_job_name(job):
     try:
 
         if job.settings and job.settings.name:
-
             return job.settings.name
 
     except Exception:
@@ -91,7 +90,6 @@ def get_job_created_time(job):
     try:
 
         if job.created_time:
-
             return format_timestamp(
                 job.created_time
             )
@@ -107,7 +105,6 @@ def get_job_updated_time(job):
     try:
 
         if job.change_time:
-
             return format_timestamp(
                 job.change_time
             )
@@ -123,7 +120,6 @@ def get_job_creator(job):
     try:
 
         if job.creator_user_name:
-
             return job.creator_user_name
 
     except Exception:
@@ -135,15 +131,12 @@ def get_job_creator(job):
 def get_run_status(run):
 
     if not run.state:
-
         return "UNKNOWN"
 
     if run.state.result_state:
-
         return run.state.result_state.value
 
     if run.state.life_cycle_state:
-
         return run.state.life_cycle_state.value
 
     return "UNKNOWN"
@@ -163,7 +156,6 @@ def get_jobs():
         for job in w.jobs.list():
 
             if job.job_id is None:
-
                 continue
 
             jobs.append(
@@ -250,7 +242,7 @@ st.caption(
 
 
 # =========================================================
-# REFRESH
+# REFRESH BUTTON
 # =========================================================
 
 refresh_col1, refresh_col2 = st.columns(
@@ -294,7 +286,7 @@ with filter_col1:
 
 
 # =========================================================
-# JOB NAME FILTER
+# JOB NAME MULTISELECT FILTER
 # =========================================================
 
 job_names = sorted(
@@ -346,28 +338,34 @@ with filter_col3:
 filtered_jobs = jobs.copy()
 
 
-# Workspace filter
+# ---------------------------------------------------------
+# WORKSPACE FILTER
+# ---------------------------------------------------------
 
 if selected_workspace != "All Workspaces":
 
-    # Currently all jobs belong to this workspace.
-    # This structure allows multiple workspaces later.
+    # Currently all jobs are from the App's workspace.
+    # This is kept here for future multi-workspace support.
 
     filtered_jobs = filtered_jobs
 
 
-# Job filter
+# ---------------------------------------------------------
+# MULTIPLE JOB FILTER
+# ---------------------------------------------------------
 
-if selected_job != "All Jobs":
+if selected_jobs:
 
     filtered_jobs = [
         job
         for job in filtered_jobs
-        if job["job_name"] == selected_job
+        if job["job_name"] in selected_jobs
     ]
 
 
-# User filter
+# ---------------------------------------------------------
+# USER FILTER
+# ---------------------------------------------------------
 
 if selected_user != "All Users":
 
@@ -379,7 +377,7 @@ if selected_user != "All Users":
 
 
 # =========================================================
-# FILTER RESULT COUNT
+# FILTER RESULT
 # =========================================================
 
 st.info(
@@ -486,7 +484,7 @@ for job in filtered_jobs:
         status = status.upper()
 
 
-        # Success
+        # Successful runs
         if status in [
             "SUCCESS",
             "SUCCEEDED"
@@ -495,7 +493,7 @@ for job in filtered_jobs:
             success_runs += 1
 
 
-        # Failed
+        # Failed runs
         elif status in [
             "FAILED",
             "ERROR",
