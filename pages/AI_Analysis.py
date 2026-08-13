@@ -1,28 +1,39 @@
 import os
 import json
-
 import streamlit as st
 import pandas as pd
 
 from databricks.sdk import WorkspaceClient
-
 from datetime import datetime, timezone, timedelta
 
 
 # =========================================================
-# PAGE TITLE
+# PAGE CONFIG
 # =========================================================
 
 st.title("🤖 AI Job Analysis")
 
 st.caption(
-    "Ask questions about your Databricks jobs, runs, "
-    "DBU usage, and job health."
+    "Ask questions about your Databricks jobs, job runs, "
+    "DBU usage, and overall job health."
 )
 
 
 # =========================================================
-# CONFIGURATION
+# DATE RANGE
+# =========================================================
+
+USAGE_END_DATE = datetime.now(
+    timezone.utc
+).date()
+
+USAGE_START_DATE = (
+    USAGE_END_DATE - timedelta(days=30)
+)
+
+
+# =========================================================
+# AI ENDPOINT CONFIGURATION
 # =========================================================
 
 DEFAULT_ENDPOINT = os.getenv(
@@ -37,7 +48,6 @@ DEFAULT_ENDPOINT = os.getenv(
 
 @st.cache_resource
 def get_databricks_client():
-
     return WorkspaceClient()
 
 
@@ -57,37 +67,20 @@ except Exception as e:
 
 
 # =========================================================
-# DATE RANGE
-# =========================================================
-
-USAGE_END_DATE = datetime.now(
-    timezone.utc
-).date()
-
-USAGE_START_DATE = (
-    USAGE_END_DATE -
-    timedelta(days=30)
-)
-
-
-# =========================================================
-# HELPERS
+# HELPER FUNCTIONS
 # =========================================================
 
 def format_timestamp(timestamp):
 
     if timestamp is None:
-
         return "-"
 
     try:
 
-        dt = datetime.fromtimestamp(
+        return datetime.fromtimestamp(
             timestamp / 1000,
             tz=timezone.utc
-        )
-
-        return dt.strftime(
+        ).strftime(
             "%Y-%m-%d %H:%M:%S UTC"
         )
 
@@ -104,11 +97,9 @@ def get_job_name(job):
             job.settings
             and job.settings.name
         ):
-
             return job.settings.name
 
     except Exception:
-
         pass
 
     return f"Job {job.job_id}"
@@ -119,11 +110,9 @@ def get_job_creator(job):
     try:
 
         if job.creator_user_name:
-
             return job.creator_user_name
 
     except Exception:
-
         pass
 
     return "-"
@@ -145,7 +134,6 @@ def get_run_result_state(run):
             )
 
     except Exception:
-
         pass
 
     return "UNKNOWN"
@@ -165,28 +153,32 @@ def get_jobs():
         for job in w.jobs.list():
 
             if job.job_id is None:
-
                 continue
-
 
             jobs.append(
                 {
                     "job_id":
-                        str(
-                            job.job_id
-                        ),
+                        str(job.job_id),
 
                     "job_name":
                         get_job_name(job),
 
                     "created_time":
                         format_timestamp(
-                            job.created_time
+                            getattr(
+                                job,
+                                "created_time",
+                                None
+                            )
                         ),
 
                     "updated_time":
                         format_timestamp(
-                            job.change_time
+                            getattr(
+                                job,
+                                "updated_time",
+                                None
+                            )
                         ),
 
                     "created_by":
@@ -194,9 +186,7 @@ def get_jobs():
                 }
             )
 
-
         return jobs
-
 
     except Exception as e:
 
@@ -206,7 +196,7 @@ def get_jobs():
 
 
 # =========================================================
-# GET RUNS
+# GET JOB RUNS
 # =========================================================
 
 @st.cache_data(ttl=60)
@@ -239,11 +229,10 @@ def get_sql_warehouse_id():
             w.warehouses.list()
         )
 
-
         if not warehouses:
-
             return None
 
+        # Prefer RUNNING warehouse
 
         for warehouse in warehouses:
 
@@ -262,9 +251,9 @@ def get_sql_warehouse_id():
 
                 continue
 
+        # Otherwise first warehouse
 
         return warehouses[0].id
-
 
     except Exception:
 
@@ -272,7 +261,7 @@ def get_sql_warehouse_id():
 
 
 # =========================================================
-# GET DBU
+# GET DBU USAGE
 # =========================================================
 
 @st.cache_data(ttl=300)
@@ -285,30 +274,27 @@ def get_job_dbu_usage():
         ]
     )
 
-
     warehouse_id = (
         get_sql_warehouse_id()
     )
 
-
     if not warehouse_id:
-
         return empty_df
 
-
     query = f"""
-    SELECT
-        CAST(usage_metadata.job_id AS STRING) AS job_id,
-        SUM(usage_quantity) AS dbu_usage
-    FROM system.billing.usage
-    WHERE usage_date >= DATE('{USAGE_START_DATE}')
-      AND usage_date <= DATE('{USAGE_END_DATE}')
-      AND usage_unit = 'DBU'
-      AND usage_metadata.job_id IS NOT NULL
-    GROUP BY
-        CAST(usage_metadata.job_id AS STRING)
-    """
-
+SELECT
+    CAST(usage_metadata.job_id AS STRING) AS job_id,
+    SUM(usage_quantity) AS dbu_usage
+FROM system.billing.usage
+WHERE usage_date >= DATE('{USAGE_START_DATE}')
+  AND usage_date <= DATE('{USAGE_END_DATE}')
+  AND usage_unit = 'DBU'
+  AND usage_metadata.job_id IS NOT NULL
+GROUP BY
+    CAST(usage_metadata.job_id AS STRING)
+ORDER BY
+    dbu_usage DESC
+"""
 
     try:
 
@@ -321,46 +307,31 @@ def get_job_dbu_usage():
             )
         )
 
-
-        if (
-            response.status is None
-        ):
-
+        if response.status is None:
             return empty_df
-
 
         if (
             response.status.state.value
             != "SUCCEEDED"
         ):
-
             return empty_df
-
 
         result = response.result
 
-
         if result is None:
-
             return empty_df
 
-
         rows = []
-
 
         if result.data_array:
 
             for row in result.data_array:
 
                 if len(row) < 2:
-
                     continue
-
 
                 if row[0] is None:
-
                     continue
-
 
                 try:
 
@@ -372,29 +343,43 @@ def get_job_dbu_usage():
 
                     dbu_value = 0.0
 
-
                 rows.append(
                     {
                         "job_id":
-                            str(
-                                row[0]
-                            ).strip(),
+                            str(row[0]).strip(),
 
                         "dbu_usage":
                             dbu_value
                     }
                 )
 
-
         if not rows:
-
             return empty_df
 
-
-        return pd.DataFrame(
+        df = pd.DataFrame(
             rows
         )
 
+        df["job_id"] = (
+            df["job_id"]
+            .astype(str)
+            .str.strip()
+        )
+
+        df["dbu_usage"] = pd.to_numeric(
+            df["dbu_usage"],
+            errors="coerce"
+        ).fillna(0.0)
+
+        df = (
+            df.groupby(
+                "job_id",
+                as_index=False
+            )["dbu_usage"]
+            .sum()
+        )
+
+        return df
 
     except Exception:
 
@@ -402,14 +387,13 @@ def get_job_dbu_usage():
 
 
 # =========================================================
-# BUILD ANALYSIS DATA
+# BUILD AI DATA
 # =========================================================
 
 @st.cache_data(ttl=60)
 def build_analysis_data():
 
     jobs_result = get_jobs()
-
 
     if isinstance(
         jobs_result,
@@ -424,15 +408,11 @@ def build_analysis_data():
                 )
         }
 
-
     jobs = jobs_result
-
 
     dbu_df = get_job_dbu_usage()
 
-
     dbu_lookup = {}
-
 
     if not dbu_df.empty:
 
@@ -452,9 +432,7 @@ def build_analysis_data():
 
                 continue
 
-
     analysis_rows = []
-
 
     for job in jobs:
 
@@ -462,21 +440,16 @@ def build_analysis_data():
             job["job_id"]
         ).strip()
 
-
         runs = get_job_runs(
             job_id
         )
-
 
         total_runs = len(
             runs
         )
 
-
         success_runs = 0
-
         failed_runs = 0
-
 
         for run in runs:
 
@@ -487,14 +460,12 @@ def build_analysis_data():
                 .upper()
             )
 
-
             if status in [
                 "SUCCESS",
                 "SUCCEEDED"
             ]:
 
                 success_runs += 1
-
 
             elif status in [
                 "FAILED",
@@ -504,14 +475,12 @@ def build_analysis_data():
 
                 failed_runs += 1
 
-
         completed_runs = (
             success_runs +
             failed_runs
         )
 
-
-        if completed_runs:
+        if completed_runs > 0:
 
             success_ratio = (
                 success_runs /
@@ -521,7 +490,6 @@ def build_analysis_data():
         else:
 
             success_ratio = 0.0
-
 
         analysis_rows.append(
             {
@@ -565,7 +533,6 @@ def build_analysis_data():
                     )
             }
         )
-
 
     return analysis_rows
 
@@ -634,17 +601,15 @@ st.subheader(
     "⚙️ AI Configuration"
 )
 
-
 endpoint_name = st.text_input(
     "Databricks Model Serving Endpoint",
     value=DEFAULT_ENDPOINT,
-    placeholder="Enter your serving endpoint name"
+    placeholder="Enter serving endpoint name"
 )
 
-
 st.caption(
-    "The endpoint must be available to this Databricks App "
-    "with query permission."
+    "The endpoint must be available to this "
+    "Databricks App with query permission."
 )
 
 
@@ -655,9 +620,10 @@ st.caption(
 SYSTEM_PROMPT = """
 You are a Databricks Job Operations Analyst.
 
-You analyze Databricks job monitoring data.
+Analyze only the Databricks job monitoring data
+provided by the application.
 
-The data provided to you contains:
+The available fields are:
 
 - Job ID
 - Job name
@@ -670,34 +636,25 @@ The data provided to you contains:
 - Success ratio
 - DBU usage
 
-Your responsibilities:
+Rules:
 
-1. Answer questions using only the provided data.
-2. Do not invent job names, job IDs, DBU values, or run counts.
-3. If the data does not contain enough information, say so.
+1. Use only the supplied data.
+2. Never invent job names, IDs, DBU values, or run counts.
+3. If information is unavailable, clearly say so.
 4. Identify jobs with failures.
 5. Identify jobs with high DBU usage.
 6. Identify jobs with low success ratios.
 7. Compare jobs when requested.
-8. Provide concise operational recommendations.
-9. Clearly distinguish facts from recommendations.
-10. Cost information is not available and should not be estimated.
-
-When presenting rankings, use tables when useful.
-
-When analyzing job health, consider:
-
-- Failed runs
-- Success ratio
-- DBU usage
-- Total number of runs
-
-Be concise and practical.
+8. Give practical operational recommendations.
+9. Clearly separate facts from recommendations.
+10. Cost information is not available.
+11. Do not estimate cost.
+12. Be concise and practical.
 """
 
 
 # =========================================================
-# SESSION STATE
+# CHAT SESSION
 # =========================================================
 
 if "ai_messages" not in st.session_state:
@@ -706,16 +663,14 @@ if "ai_messages" not in st.session_state:
 
 
 # =========================================================
-# QUICK ANALYSIS BUTTONS
+# QUICK QUESTIONS
 # =========================================================
 
 st.subheader(
     "💡 Quick Questions"
 )
 
-
 quick1, quick2, quick3, quick4 = st.columns(4)
-
 
 quick_question = None
 
@@ -727,9 +682,9 @@ with quick1:
     ):
 
         quick_question = (
-            "Which jobs have the highest "
-            "DBU usage? Show the top 5 and "
-            "explain which ones should be investigated."
+            "Which jobs have the highest DBU "
+            "usage? Show the top 5 and explain "
+            "which ones should be investigated."
         )
 
 
@@ -753,8 +708,8 @@ with quick3:
 
         quick_question = (
             "Give me an overall health analysis "
-            "of the Databricks jobs. Identify the "
-            "jobs that need attention."
+            "of the Databricks jobs and identify "
+            "the jobs that need attention."
         )
 
 
@@ -771,7 +726,7 @@ with quick4:
 
 
 # =========================================================
-# CHAT HISTORY
+# DISPLAY CHAT HISTORY
 # =========================================================
 
 for message in st.session_state.ai_messages:
@@ -800,7 +755,7 @@ if quick_question:
 
 
 # =========================================================
-# AI REQUEST
+# PROCESS QUESTION
 # =========================================================
 
 if user_question:
@@ -816,16 +771,13 @@ if user_question:
 
 
     # -----------------------------------------------------
-    # SAVE USER MESSAGE
+    # SAVE USER QUESTION
     # -----------------------------------------------------
 
     st.session_state.ai_messages.append(
         {
-            "role":
-                "user",
-
-            "content":
-                user_question
+            "role": "user",
+            "content": user_question
         }
     )
 
@@ -840,7 +792,7 @@ if user_question:
 
 
     # -----------------------------------------------------
-    # CREATE DATA CONTEXT
+    # PREPARE DATA
     # -----------------------------------------------------
 
     data_context = json.dumps(
@@ -850,27 +802,232 @@ if user_question:
     )
 
 
-    # Prevent excessively large prompts
+    # Keep prompt at reasonable size
 
     max_context_chars = 50000
-
 
     if len(data_context) > max_context_chars:
 
         data_context = (
-            data_context[
-                :max_context_chars
-            ]
+            data_context[:max_context_chars]
             + "\n...[data truncated]"
         )
 
 
     # -----------------------------------------------------
-    # BUILD USER PROMPT
+    # BUILD PROMPT
     # -----------------------------------------------------
 
-    user_prompt = f"""
-Here is the current Databricks job monitoring data:
+    user_prompt = (
+        "Here is the current Databricks job "
+        "monitoring data:\n\n"
+        "```json\n"
+        + data_context
+        + "\n```\n\n"
+        "DBU usage period: "
+        + str(USAGE_START_DATE)
+        + " to "
+        + str(USAGE_END_DATE)
+        + "\n\n"
+        "User question:\n"
+        + user_question
+        + "\n\n"
+        "Analyze the supplied data and answer "
+        "the user's question."
+    )
 
-```json
-{data_context}
+
+    # -----------------------------------------------------
+    # CALL MODEL SERVING
+    # -----------------------------------------------------
+
+    with st.chat_message(
+        "assistant"
+    ):
+
+        with st.spinner(
+            "Analyzing job data..."
+        ):
+
+            try:
+
+                response = (
+                    w
+                    .serving_endpoints_data_plane
+                    .query(
+                        name=endpoint_name.strip(),
+
+                        messages=[
+                            {
+                                "role":
+                                    "system",
+
+                                "content":
+                                    SYSTEM_PROMPT
+                            },
+                            {
+                                "role":
+                                    "user",
+
+                                "content":
+                                    user_prompt
+                            }
+                        ],
+
+                        temperature=0.2,
+
+                        max_tokens=1200
+                    )
+                )
+
+
+                # -----------------------------------------
+                # READ RESPONSE
+                # -----------------------------------------
+
+                answer = None
+
+
+                try:
+
+                    if (
+                        response
+                        and response.choices
+                    ):
+
+                        choice = (
+                            response.choices[0]
+                        )
+
+
+                        if (
+                            choice.message
+                            and
+                            choice.message.content
+                        ):
+
+                            answer = (
+                                choice
+                                .message
+                                .content
+                            )
+
+                except Exception:
+
+                    answer = None
+
+
+                # -----------------------------------------
+                # FALLBACK
+                # -----------------------------------------
+
+                if not answer:
+
+                    try:
+
+                        response_dict = (
+                            response.as_dict()
+                        )
+
+                        choices = (
+                            response_dict.get(
+                                "choices",
+                                []
+                            )
+                        )
+
+                        if choices:
+
+                            answer = (
+                                choices[0]
+                                .get(
+                                    "message",
+                                    {}
+                                )
+                                .get(
+                                    "content"
+                                )
+                            )
+
+                    except Exception:
+
+                        answer = None
+
+
+                # -----------------------------------------
+                # FINAL RESPONSE
+                # -----------------------------------------
+
+                if not answer:
+
+                    answer = (
+                        "The AI endpoint returned a response, "
+                        "but the response format could not "
+                        "be read."
+                    )
+
+
+                st.markdown(
+                    answer
+                )
+
+
+                # -----------------------------------------
+                # SAVE RESPONSE
+                # -----------------------------------------
+
+                st.session_state.ai_messages.append(
+                    {
+                        "role":
+                            "assistant",
+
+                        "content":
+                            answer
+                    }
+                )
+
+
+            except Exception as e:
+
+                error_message = (
+                    "Unable to query the Databricks "
+                    "AI serving endpoint.\n\n"
+                    "Error: `"
+                    + str(e)
+                    + "`"
+                )
+
+
+                st.error(
+                    error_message
+                )
+
+
+                st.info(
+                    """
+Check the following:
+
+1. The serving endpoint name is correct.
+2. The Databricks App has Can Query permission
+   on the serving endpoint.
+3. The endpoint is available.
+4. The endpoint supports chat messages.
+"""
+                )
+
+
+# =========================================================
+# CLEAR CHAT
+# =========================================================
+
+if st.session_state.ai_messages:
+
+    st.divider()
+
+    if st.button(
+        "🗑️ Clear Chat"
+    ):
+
+        st.session_state.ai_messages = []
+
+        st.rerun()
