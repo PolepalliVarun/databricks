@@ -194,24 +194,16 @@ def get_jobs():
 @st.cache_data(ttl=60)
 def get_job_runs(job_id):
 
-    all_runs = []
-
     try:
 
-        # IMPORTANT:
-        # Your workspace allows maximum limit = 26
         response = w.jobs.list_runs(
             job_id=job_id,
             limit=26
         )
 
-        for run in response:
+        runs = list(response)
 
-            all_runs.append(run)
-
-
-        return all_runs
-
+        return runs
 
     except Exception as e:
 
@@ -258,21 +250,141 @@ st.caption(
 
 
 # =========================================================
-# REFRESH BUTTON
+# REFRESH
 # =========================================================
 
-if st.button("🔄 Refresh"):
+refresh_col1, refresh_col2 = st.columns(
+    [8, 1]
+)
 
-    st.cache_data.clear()
+with refresh_col2:
 
-    st.rerun()
+    if st.button("🔄 Refresh"):
+
+        st.cache_data.clear()
+
+        st.rerun()
 
 
 # =========================================================
-# WORKSPACE
+# FILTER SECTION
 # =========================================================
 
-workspace_name = "Databricks Workspace"
+st.subheader("🔎 Filters")
+
+
+filter_col1, filter_col2, filter_col3 = st.columns(3)
+
+
+# =========================================================
+# WORKSPACE FILTER
+# =========================================================
+
+with filter_col1:
+
+    workspace_options = [
+        "All Workspaces",
+        "Databricks Workspace"
+    ]
+
+    selected_workspace = st.selectbox(
+        "Workspace",
+        workspace_options
+    )
+
+
+# =========================================================
+# JOB NAME FILTER
+# =========================================================
+
+job_names = sorted(
+    list(
+        set(
+            job["job_name"]
+            for job in jobs
+        )
+    )
+)
+
+
+with filter_col2:
+
+    selected_job = st.selectbox(
+        "Job Name",
+        ["All Jobs"] + job_names
+    )
+
+
+# =========================================================
+# USER FILTER
+# =========================================================
+
+users = sorted(
+    list(
+        set(
+            job["created_by"]
+            for job in jobs
+            if job["created_by"] != "-"
+        )
+    )
+)
+
+
+with filter_col3:
+
+    selected_user = st.selectbox(
+        "Created By",
+        ["All Users"] + users
+    )
+
+
+# =========================================================
+# APPLY FILTERS
+# =========================================================
+
+filtered_jobs = jobs.copy()
+
+
+# Workspace filter
+
+if selected_workspace != "All Workspaces":
+
+    # Currently all jobs belong to this workspace.
+    # This structure allows multiple workspaces later.
+
+    filtered_jobs = filtered_jobs
+
+
+# Job filter
+
+if selected_job != "All Jobs":
+
+    filtered_jobs = [
+        job
+        for job in filtered_jobs
+        if job["job_name"] == selected_job
+    ]
+
+
+# User filter
+
+if selected_user != "All Users":
+
+    filtered_jobs = [
+        job
+        for job in filtered_jobs
+        if job["created_by"] == selected_user
+    ]
+
+
+# =========================================================
+# FILTER RESULT COUNT
+# =========================================================
+
+st.info(
+    f"Showing **{len(filtered_jobs)}** of "
+    f"**{len(jobs)}** jobs"
+)
 
 
 # =========================================================
@@ -288,12 +400,12 @@ st.subheader(
 job_information = []
 
 
-for job in jobs:
+for job in filtered_jobs:
 
     job_information.append(
         {
             "Workspace Name":
-                workspace_name,
+                "Databricks Workspace",
 
             "Job Name":
                 job["job_name"],
@@ -313,11 +425,19 @@ for job in jobs:
     )
 
 
-st.dataframe(
-    job_information,
-    use_container_width=True,
-    hide_index=True
-)
+if job_information:
+
+    st.dataframe(
+        job_information,
+        use_container_width=True,
+        hide_index=True
+    )
+
+else:
+
+    st.warning(
+        "No jobs match the selected filters."
+    )
 
 
 # =========================================================
@@ -333,7 +453,7 @@ st.subheader(
 run_summary = []
 
 
-for job in jobs:
+for job in filtered_jobs:
 
     job_id = job["job_id"]
 
@@ -344,7 +464,7 @@ for job in jobs:
     runs = get_job_runs(job_id)
 
 
-    # Total
+    # Total runs
     total_runs = len(runs)
 
 
@@ -365,7 +485,7 @@ for job in jobs:
         status = status.upper()
 
 
-        # Successful
+        # Success
         if status in [
             "SUCCESS",
             "SUCCEEDED"
@@ -434,11 +554,19 @@ for job in jobs:
 # DISPLAY TABLE 2
 # =========================================================
 
-st.dataframe(
-    run_summary,
-    use_container_width=True,
-    hide_index=True
-)
+if run_summary:
+
+    st.dataframe(
+        run_summary,
+        use_container_width=True,
+        hide_index=True
+    )
+
+else:
+
+    st.warning(
+        "No job run data available for the selected filters."
+    )
 
 
 # =========================================================
@@ -448,7 +576,7 @@ st.dataframe(
 st.divider()
 
 
-total_jobs = len(jobs)
+total_jobs = len(filtered_jobs)
 
 
 total_runs = sum(
