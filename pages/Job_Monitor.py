@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 
 from databricks.sdk import WorkspaceClient
-
 from datetime import datetime, timezone, timedelta
 
 
@@ -14,7 +13,7 @@ st.title("📊 Databricks Job Monitor")
 
 
 # =========================================================
-# DATE RANGE
+# DBU DATE RANGE
 # =========================================================
 
 USAGE_END_DATE = datetime.now(
@@ -22,8 +21,7 @@ USAGE_END_DATE = datetime.now(
 ).date()
 
 USAGE_START_DATE = (
-    USAGE_END_DATE -
-    timedelta(days=30)
+    USAGE_END_DATE - timedelta(days=30)
 )
 
 
@@ -33,22 +31,16 @@ USAGE_START_DATE = (
 
 @st.cache_resource
 def get_databricks_client():
-
     return WorkspaceClient()
 
 
 try:
-
     w = get_databricks_client()
 
 except Exception as e:
 
-    st.error(
-        "Unable to create Databricks client."
-    )
-
+    st.error("Unable to create Databricks client.")
     st.exception(e)
-
     st.stop()
 
 
@@ -65,22 +57,21 @@ try:
     )
 
 except Exception:
-
     pass
 
 
 # =========================================================
-# HELPER FUNCTIONS
+# HELPER - FORMAT TIMESTAMP
 # =========================================================
 
 def format_timestamp(timestamp):
 
     if timestamp is None:
-
         return "-"
 
     try:
 
+        # Databricks API timestamps are normally milliseconds
         dt = datetime.fromtimestamp(
             timestamp / 1000,
             tz=timezone.utc
@@ -95,38 +86,107 @@ def format_timestamp(timestamp):
         return "-"
 
 
+# =========================================================
+# HELPER - GET JOB NAME
+# =========================================================
+
 def get_job_name(job):
 
     try:
 
-        if (
-            job.settings
-            and job.settings.name
-        ):
-
+        if job.settings and job.settings.name:
             return job.settings.name
 
     except Exception:
-
         pass
 
     return f"Job {job.job_id}"
 
+
+# =========================================================
+# HELPER - GET CREATOR
+# =========================================================
 
 def get_job_creator(job):
 
     try:
 
         if job.creator_user_name:
-
             return job.creator_user_name
 
     except Exception:
-
         pass
 
     return "-"
 
+
+# =========================================================
+# HELPER - GET CREATED TIME
+# =========================================================
+
+def get_created_time(job):
+
+    try:
+
+        value = getattr(
+            job,
+            "created_time",
+            None
+        )
+
+        return format_timestamp(value)
+
+    except Exception:
+
+        return "-"
+
+
+# =========================================================
+# HELPER - GET LAST UPDATE TIME
+# =========================================================
+
+def get_updated_time(job):
+
+    """
+    Databricks BaseJob does not expose change_time.
+
+    Different SDK/API versions can expose job metadata
+    differently, so check supported fields safely.
+    """
+
+    possible_fields = [
+        "updated_time",
+        "update_time",
+        "last_update_time",
+        "change_time"
+    ]
+
+    for field in possible_fields:
+
+        try:
+
+            value = getattr(
+                job,
+                field,
+                None
+            )
+
+            if value is not None:
+
+                return format_timestamp(
+                    value
+                )
+
+        except Exception:
+
+            continue
+
+    return "-"
+
+
+# =========================================================
+# HELPER - RUN RESULT
+# =========================================================
 
 def get_run_result_state(run):
 
@@ -144,7 +204,6 @@ def get_run_result_state(run):
             )
 
     except Exception:
-
         pass
 
     return "UNKNOWN"
@@ -164,8 +223,8 @@ def get_jobs():
         for job in w.jobs.list():
 
             if job.job_id is None:
-
                 continue
+
 
             jobs.append(
                 {
@@ -176,21 +235,19 @@ def get_jobs():
                         get_job_name(job),
 
                     "created_time":
-                        format_timestamp(
-                            job.created_time
-                        ),
+                        get_created_time(job),
 
                     "updated_time":
-                        format_timestamp(
-                            job.change_time
-                        ),
+                        get_updated_time(job),
 
                     "created_by":
                         get_job_creator(job)
                 }
             )
 
+
         return jobs
+
 
     except Exception as e:
 
@@ -233,8 +290,8 @@ def get_sql_warehouse_id():
             w.warehouses.list()
         )
 
-        if not warehouses:
 
+        if not warehouses:
             return None
 
 
@@ -258,7 +315,10 @@ def get_sql_warehouse_id():
                 continue
 
 
+        # Otherwise use first warehouse
+
         return warehouses[0].id
+
 
     except Exception:
 
@@ -286,6 +346,11 @@ def get_job_dbu_usage():
 
 
     if not warehouse_id:
+
+        st.warning(
+            "No SQL Warehouse was found. "
+            "DBU usage cannot be retrieved."
+        )
 
         return empty_df
 
@@ -318,10 +383,7 @@ def get_job_dbu_usage():
         )
 
 
-        if (
-            response.status is None
-        ):
-
+        if response.status is None:
             return empty_df
 
 
@@ -334,6 +396,12 @@ def get_job_dbu_usage():
 
         if status != "SUCCEEDED":
 
+            st.warning(
+                "Unable to retrieve DBU usage "
+                f"from system.billing.usage. "
+                f"SQL status: {status}"
+            )
+
             return empty_df
 
 
@@ -341,7 +409,6 @@ def get_job_dbu_usage():
 
 
         if result is None:
-
             return empty_df
 
 
@@ -353,7 +420,6 @@ def get_job_dbu_usage():
             for row in result.data_array:
 
                 if len(row) < 2:
-
                     continue
 
 
@@ -363,7 +429,6 @@ def get_job_dbu_usage():
 
 
                 if job_id is None:
-
                     continue
 
 
@@ -392,7 +457,6 @@ def get_job_dbu_usage():
 
 
         if not rows:
-
             return empty_df
 
 
@@ -414,6 +478,8 @@ def get_job_dbu_usage():
         ).fillna(0.0)
 
 
+        # Prevent duplicate Job IDs
+
         df = (
             df.groupby(
                 "job_id",
@@ -426,7 +492,16 @@ def get_job_dbu_usage():
         return df
 
 
-    except Exception:
+    except Exception as e:
+
+        st.warning(
+            "Unable to retrieve DBU usage "
+            "from system.billing.usage."
+        )
+
+        st.caption(
+            str(e)
+        )
 
         return empty_df
 
@@ -471,6 +546,10 @@ if isinstance(
 jobs = jobs_result
 
 
+# =========================================================
+# NO JOBS
+# =========================================================
+
 if not jobs:
 
     st.warning(
@@ -512,11 +591,12 @@ if not job_dbu_df.empty:
 
         try:
 
-            dbu_lookup[
-                str(
-                    row["job_id"]
-                ).strip()
-            ] = float(
+            job_id = str(
+                row["job_id"]
+            ).strip()
+
+
+            dbu_lookup[job_id] = float(
                 row["dbu_usage"]
             )
 
@@ -534,8 +614,14 @@ st.subheader(
 )
 
 
-filter1, filter2 = st.columns(2)
+filter_col1, filter_col2 = st.columns(
+    2
+)
 
+
+# =========================================================
+# JOB NAME FILTER
+# =========================================================
 
 job_names = sorted(
     list(
@@ -547,13 +633,18 @@ job_names = sorted(
 )
 
 
-with filter1:
+with filter_col1:
 
     selected_jobs = st.multiselect(
         "Job Name",
-        options=job_names
+        options=job_names,
+        placeholder="Select one or more jobs"
     )
 
+
+# =========================================================
+# CREATED BY FILTER
+# =========================================================
 
 created_by_values = sorted(
     list(
@@ -566,7 +657,7 @@ created_by_values = sorted(
 )
 
 
-with filter2:
+with filter_col2:
 
     selected_user = st.selectbox(
         "Created By",
@@ -603,8 +694,8 @@ if selected_user != "All Users":
 
 
 st.info(
-    f"Showing {len(filtered_jobs)} "
-    f"of {len(jobs)} jobs"
+    f"Showing **{len(filtered_jobs)}** "
+    f"of **{len(jobs)}** jobs"
 )
 
 
@@ -692,7 +783,7 @@ else:
 
 
 # =========================================================
-# TABLE 2
+# TABLE 2 - RUN SUMMARY
 # =========================================================
 
 st.subheader(
@@ -757,7 +848,7 @@ for job in filtered_jobs:
     )
 
 
-    if completed_runs:
+    if completed_runs > 0:
 
         success_ratio = (
             success_runs /
@@ -813,7 +904,7 @@ else:
 
 
 # =========================================================
-# SUMMARY
+# SUMMARY METRICS
 # =========================================================
 
 st.divider()
@@ -848,7 +939,9 @@ total_dbu = sum(
 )
 
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5 = st.columns(
+    5
+)
 
 
 with col1:
