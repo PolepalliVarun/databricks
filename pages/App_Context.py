@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 
 
 # =========================================================
@@ -13,16 +14,18 @@ st.set_page_config(
 
 
 # =========================================================
-# PAGE HEADER
+# HEADER
 # =========================================================
 
-st.title("📘 Databricks Job Monitoring Application")
+st.title(
+    "📘 Application Context"
+)
 
 st.markdown(
     """
-    This application provides a centralized view of
-    Databricks job information, job execution activity,
-    and DBU usage.
+    This page provides an overview of the Databricks
+    Operations Dashboard, its purpose, architecture,
+    data sources, and current functionality.
     """
 )
 
@@ -31,113 +34,121 @@ st.markdown(
 # 1. APPLICATION OVERVIEW
 # =========================================================
 
-st.header("1. Application Overview")
+st.header(
+    "1. Application Overview"
+)
 
 st.markdown(
     """
-    The Databricks Job Monitoring Application is designed
-    to provide an easy-to-use interface for monitoring and
-    understanding Databricks jobs.
+    The **Databricks Operations Dashboard** is a Streamlit
+    application designed to provide centralized visibility
+    into Databricks jobs and their resource usage.
 
-    Instead of manually checking individual jobs and their
-    execution details, the application brings important
-    job information into a single dashboard.
+    The application retrieves job information through the
+    Databricks Jobs API and retrieves DBU usage from the
+    Databricks billing system table.
 
-    The application currently focuses on two primary
-    scenarios:
-
-    - **Job Monitoring** – View and monitor Databricks jobs
-      and their execution information.
-
-    - **DBU Usage Monitoring** – View DBU consumption
-      associated with individual Databricks jobs.
+    The objective is to provide an easy-to-use interface
+    for operational monitoring without requiring users to
+    manually execute multiple Databricks queries.
     """
 )
 
 
 # =========================================================
-# 2. PURPOSE OF THE APPLICATION
+# 2. PURPOSE
 # =========================================================
 
-st.header("2. Purpose")
+st.header(
+    "2. Purpose of the Application"
+)
 
 st.markdown(
     """
-    The main purpose of the application is to simplify
-    Databricks job monitoring and provide operational
-    visibility.
+    The primary purpose of the application is to simplify
+    Databricks job monitoring.
 
-    It helps users quickly identify:
+    It provides visibility into:
 
-    - Available Databricks jobs
-    - Job names and Job IDs
+    - Databricks jobs
+    - Job IDs
     - Job creation information
     - Job update information
-    - Job owners/creators
-    - Job execution statistics
-    - Successful and failed runs
-    - DBU consumption by job
+    - Job owners
+    - Job execution history
+    - Successful executions
+    - Failed executions
+    - Success ratios
+    - Job-level DBU usage
     """
 )
 
 
 # =========================================================
-# 3. APPLICATION SCENARIOS
+# 3. CURRENT SCENARIOS
 # =========================================================
 
-st.header("3. Application Scenarios")
+st.header(
+    "3. Current Application Scenarios"
+)
 
 
 with st.expander(
-    "📊 Scenario 1 – Job Monitoring",
+    "📊 Scenario 1 - Job Monitoring",
     expanded=True
 ):
 
     st.markdown(
         """
-        The Job Monitoring scenario provides information
-        about Databricks jobs available in the connected
-        workspace.
+        The Job Monitoring scenario provides operational
+        visibility into Databricks jobs.
 
         Users can:
 
-        - View all available jobs
-        - Search/filter jobs by name
-        - Filter jobs based on the creator
+        - View available Databricks jobs
+        - Filter jobs by name
+        - Filter jobs by creator
         - View Job IDs
-        - View job creation dates
-        - View last update information
-        - Review job execution statistics
-        - View successful and failed runs
-        - Review job success ratios
+        - View creation dates
+        - View last update dates
+        - View job execution statistics
+        - View successful runs
+        - View failed runs
+        - View success ratios
         """
     )
 
 
 with st.expander(
-    "📈 Scenario 2 – DBU Usage"
+    "📈 Scenario 2 - DBU Usage"
 ):
 
     st.markdown(
         """
         The DBU Usage scenario provides visibility into
-        Databricks Unit (DBU) consumption.
+        Databricks Unit consumption.
 
-        DBU usage is retrieved from the Databricks
-        `system.billing.usage` table.
+        DBU information is retrieved from:
 
-        Job-level DBU usage is associated with the
-        corresponding Databricks Job ID using:
+        `system.billing.usage`
+
+        The application uses:
 
         `usage_metadata.job_id`
 
-        The application aggregates DBU consumption for
-        the configured usage period and maps the result
-        back to the corresponding Databricks jobs.
+        to associate billing usage with the corresponding
+        Databricks Job ID.
 
-        This allows users to understand which jobs are
-        consuming DBUs and how much DBU usage is associated
-        with each job.
+        DBU usage is aggregated using:
+
+        `SUM(usage_quantity)`
+
+        and grouped by Job ID.
+
+        The current implementation calculates DBU usage
+        over a rolling 30-day period.
+
+        Cost calculation is currently not included.
         """
     )
 
@@ -146,34 +157,40 @@ with st.expander(
 # 4. DATA SOURCES
 # =========================================================
 
-st.header("4. Data Sources")
+st.header(
+    "4. Data Sources"
+)
 
 st.markdown(
     """
-    The application uses Databricks APIs and system tables
-    to retrieve the required information.
+    The application uses two primary Databricks data
+    sources.
     """
 )
 
 
-st.subheader("Databricks Jobs API")
+st.subheader(
+    "Databricks Jobs API"
+)
 
 st.markdown(
     """
-    The Databricks SDK is used to retrieve job information,
-    including:
+    The Databricks Python SDK is used to retrieve:
 
     - Job ID
-    - Job name
-    - Created date
-    - Last update date
-    - Job creator
-    - Job runs
+    - Job Name
+    - Created Date
+    - Last Update Date
+    - Created By
+    - Job Runs
+    - Run Status
     """
 )
 
 
-st.subheader("Databricks System Billing")
+st.subheader(
+    "Databricks System Billing"
+)
 
 st.markdown(
     """
@@ -181,224 +198,278 @@ st.markdown(
 
     `system.billing.usage`
 
-    The application uses the following information:
+    Relevant fields include:
 
     - `usage_date`
     - `usage_unit`
     - `usage_quantity`
     - `usage_metadata.job_id`
-
-    DBU records are grouped by Job ID to calculate
-    job-level DBU usage.
     """
 )
 
 
 # =========================================================
-# 5. DATA FLOW
+# 5. ARCHITECTURE
 # =========================================================
 
-st.header("5. Application Data Flow")
+st.header(
+    "5. Application Architecture"
+)
 
 st.code(
     """
-Databricks Workspace
-        |
-        |
-        +----------------------+
-        |                      |
-        v                      v
- Databricks Jobs API     system.billing.usage
-        |                      |
-        |                      |
-        v                      v
-   Job Details             DBU Usage
-        |                      |
-        |                 usage_metadata
-        |                    .job_id
-        |                      |
-        +----------+-----------+
-                   |
-                   v
-             Job ID Mapping
-                   |
-                   v
-          Streamlit Dashboard
-                   |
-          +--------+--------+
-          |                 |
-          v                 v
-     Job Monitor        DBU Usage
+                    Databricks Workspace
+                           |
+             +-------------+-------------+
+             |                           |
+             v                           v
+      Databricks Jobs API        system.billing.usage
+             |                           |
+             v                           v
+        Job Details                  DBU Usage
+             |                           |
+             |                     job_id mapping
+             |                           |
+             +-------------+-------------+
+                           |
+                           v
+                    Streamlit Application
+                           |
+             +-------------+-------------+
+             |                           |
+             v                           v
+       Job Monitor                 App Context
+    """,
+    language="text"
+)
+
+
+# =========================================================
+# 6. JOB MONITOR FLOW
+# =========================================================
+
+st.header(
+    "6. Job Monitor Data Flow"
+)
+
+st.markdown(
+    """
+    **Step 1 - Connect to Databricks**
+
+    The application creates a Databricks SDK
+    `WorkspaceClient`.
+
+    **Step 2 - Retrieve Jobs**
+
+    The application calls the Databricks Jobs API and
+    retrieves the jobs available in the workspace.
+
+    **Step 3 - Retrieve Job Runs**
+
+    Recent job runs are retrieved for each selected job.
+
+    **Step 4 - Analyze Run Status**
+
+    Run statuses are categorized into successful and
+    failed executions.
+
+    **Step 5 - Display Results**
+
+    The results are displayed in tables and summary
+    metrics.
     """
 )
 
 
 # =========================================================
-# 6. JOB MONITORING FLOW
+# 7. DBU DATA FLOW
 # =========================================================
 
-st.header("6. Job Monitoring Flow")
-
-st.markdown(
-    """
-    The Job Monitoring page follows this process:
-
-    **Step 1 – Retrieve Jobs**
-
-    The application connects to the Databricks workspace
-    and retrieves available jobs using the Databricks SDK.
-
-    **Step 2 – Display Job Information**
-
-    Job details such as Job Name, Job ID, Created Date,
-    Last Update Date, and Created By are displayed.
-
-    **Step 3 – Retrieve Job Runs**
-
-    The application retrieves recent runs for each job.
-
-    **Step 4 – Analyze Run Status**
-
-    Runs are categorized based on their execution status.
-
-    **Step 5 – Display Monitoring Information**
-
-    The dashboard presents total runs, successful runs,
-    failed runs, and success ratios.
-    """
+st.header(
+    "7. DBU Usage Data Flow"
 )
 
-
-# =========================================================
-# 7. DBU USAGE FLOW
-# =========================================================
-
-st.header("7. DBU Usage Flow")
-
 st.markdown(
     """
-    The DBU Usage page follows this process:
+    **Step 1 - Identify SQL Warehouse**
 
-    **Step 1 – Query Billing Data**
+    The application identifies an available Databricks SQL
+    Warehouse.
 
-    The application queries the Databricks
-    `system.billing.usage` table.
+    **Step 2 - Execute SQL**
 
-    **Step 2 – Identify Job-Level Usage**
+    The Databricks SQL Statement Execution API is used to
+    execute the billing query.
 
-    Records containing:
+    **Step 3 - Read Billing Data**
+
+    The query reads:
+
+    `system.billing.usage`
+
+    **Step 4 - Identify Job**
+
+    The field:
 
     `usage_metadata.job_id`
 
-    are used to associate DBU usage with Databricks jobs.
+    is used to identify the associated Databricks job.
 
-    **Step 3 – Aggregate DBU**
+    **Step 5 - Aggregate DBU**
 
-    DBU consumption is calculated using:
+    DBU usage is calculated using:
 
     `SUM(usage_quantity)`
 
     grouped by Job ID.
 
-    **Step 4 – Map DBU to Jobs**
+    **Step 6 - Map Results**
 
-    The calculated DBU values are matched with the
-    corresponding Job IDs retrieved from the Jobs API.
-
-    **Step 5 – Display Results**
-
-    The DBU usage is displayed alongside the relevant
-    Databricks job information.
+    The DBU result is mapped back to the jobs retrieved
+    from the Databricks Jobs API.
     """
 )
 
 
 # =========================================================
-# 8. FILTERING
+# 8. DBU PERIOD
 # =========================================================
 
-st.header("8. Filtering and Navigation")
+st.header(
+    "8. DBU Usage Period"
+)
 
 st.markdown(
     """
-    The application provides filters to help users focus
-    on specific jobs.
+    The current application uses a rolling **30-day**
+    DBU usage period.
 
-    Available filters include:
+    The start and end dates are automatically calculated
+    by the application.
 
-    - **Workspace**
-    - **Job Name**
-    - **Created By**
-
-    These filters allow users to narrow the displayed
-    information without changing the underlying data.
+    No DBU date filter is exposed to the user in the
+    current version.
     """
 )
 
 
 # =========================================================
-# 9. DBU USAGE PERIOD
+# 9. FILTERS
 # =========================================================
 
-st.header("9. DBU Usage Period")
+st.header(
+    "9. Available Filters"
+)
 
-st.markdown(
-    """
-    DBU usage is currently calculated for a rolling
-    30-day period.
+filter_data = pd.DataFrame(
+    [
+        {
+            "Filter":
+                "Workspace",
 
-    The period is automatically calculated based on the
-    current date.
+            "Purpose":
+                "Select the connected Databricks workspace"
+        },
 
-    This means the application does not require users to
-    manually enter a DBU date range.
-    """
+        {
+            "Filter":
+                "Job Name",
+
+            "Purpose":
+                "Display selected Databricks jobs"
+        },
+
+        {
+            "Filter":
+                "Created By",
+
+            "Purpose":
+                "Filter jobs by job creator"
+        }
+    ]
+)
+
+
+st.dataframe(
+    filter_data,
+    use_container_width=True,
+    hide_index=True
 )
 
 
 # =========================================================
-# 10. TECHNOLOGIES USED
+# 10. TECHNOLOGIES
 # =========================================================
 
-st.header("10. Technologies Used")
+st.header(
+    "10. Technologies Used"
+)
 
-technologies = {
-    "Frontend / Dashboard":
-        "Streamlit",
+technology_data = pd.DataFrame(
+    [
+        {
+            "Component":
+                "Application Framework",
 
-    "Cloud Platform":
-        "Microsoft Azure / Databricks",
+            "Technology":
+                "Streamlit"
+        },
 
-    "Databricks Integration":
-        "Databricks SDK for Python",
+        {
+            "Component":
+                "Programming Language",
 
-    "Job Information":
-        "Databricks Jobs API",
+            "Technology":
+                "Python"
+        },
 
-    "Billing / DBU Information":
-        "Databricks System Tables",
+        {
+            "Component":
+                "Databricks Integration",
 
-    "Billing Table":
-        "system.billing.usage",
+            "Technology":
+                "Databricks SDK for Python"
+        },
 
-    "Programming Language":
-        "Python",
+        {
+            "Component":
+                "Job Information",
 
-    "Data Processing":
-        "Pandas"
-}
+            "Technology":
+                "Databricks Jobs API"
+        },
+
+        {
+            "Component":
+                "DBU Information",
+
+            "Technology":
+                "system.billing.usage"
+        },
+
+        {
+            "Component":
+                "SQL Execution",
+
+            "Technology":
+                "Databricks SQL Statement Execution API"
+        },
+
+        {
+            "Component":
+                "Data Processing",
+
+            "Technology":
+                "Pandas"
+        }
+    ]
+)
 
 
-st.table(
-    pd.DataFrame(
-        list(
-            technologies.items()
-        ),
-        columns=[
-            "Component",
-            "Technology"
-        ]
-    )
+st.dataframe(
+    technology_data,
+    use_container_width=True,
+    hide_index=True
 )
 
 
@@ -406,44 +477,72 @@ st.table(
 # 11. BENEFITS
 # =========================================================
 
-st.header("11. Benefits")
+st.header(
+    "11. Benefits"
+)
 
 st.markdown(
     """
     The application provides the following benefits:
 
-    - Centralized visibility into Databricks jobs
+    - Centralized Databricks job visibility
     - Simplified job monitoring
-    - Faster identification of failed executions
+    - Easy identification of failed job runs
     - Job-level DBU visibility
-    - Reduced need for manual queries
-    - Easy filtering and navigation
-    - Operational monitoring through a single interface
-    - Foundation for future cost and usage analysis
+    - Reduced manual SQL execution
+    - Easy filtering of jobs
+    - Centralized operational information
+    - Foundation for future cost analysis
     """
 )
 
 
 # =========================================================
-# 12. FUTURE ENHANCEMENTS
+# 12. CURRENT LIMITATIONS
 # =========================================================
 
-st.header("12. Future Enhancements")
+st.header(
+    "12. Current Limitations"
+)
 
 st.markdown(
     """
-    The application can be extended with additional
-    capabilities such as:
+    The current version has the following limitations:
 
-    - Job cost calculation
-    - Custom DBU date-range selection
-    - Historical DBU trends
-    - Job performance dashboards
-    - Automated alerts for failed jobs
+    - DBU usage is currently limited to a rolling 30-day
+      period.
+    - Cost calculation is not currently included.
+    - DBU information requires permission to access
+      `system.billing.usage`.
+    - DBU information requires access to a SQL Warehouse.
+    - The application currently monitors the connected
+      Databricks workspace.
+    """
+)
+
+
+# =========================================================
+# 13. FUTURE ENHANCEMENTS
+# =========================================================
+
+st.header(
+    "13. Future Enhancements"
+)
+
+st.markdown(
+    """
+    Potential future enhancements include:
+
+    - Cost calculation
+    - Custom DBU date ranges
+    - DBU trend charts
+    - Job performance analysis
+    - Job duration analysis
     - High DBU usage alerts
-    - Job execution duration analysis
-    - Workspace-level usage comparison
-    - Export of job and usage reports
+    - Failed job alerts
+    - Historical job comparisons
+    - Workspace-level usage analysis
+    - Report export functionality
     - Additional Databricks system-table integrations
     """
 )
@@ -456,7 +555,7 @@ st.markdown(
 st.divider()
 
 st.caption(
-    "Databricks Job Monitoring Application"
+    "Databricks Operations Dashboard"
 )
 
 st.caption(
