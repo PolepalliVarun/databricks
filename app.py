@@ -1,10 +1,8 @@
 import streamlit as st
+import pandas as pd
 
 from databricks.sdk import WorkspaceClient
-
 from datetime import datetime, timezone, timedelta
-
-import pandas as pd
 
 
 # =========================================================
@@ -22,23 +20,11 @@ st.set_page_config(
 # CONFIGURATION
 # =========================================================
 
-# ---------------------------------------------------------
-# DBU PRICE
-# ---------------------------------------------------------
-# This is intentionally NOT displayed as a UI filter.
-# Change this according to your applicable DBU price.
-# ---------------------------------------------------------
-
+# DBU price used for estimated cost.
+# Change this value if your applicable DBU price is different.
 DBU_PRICE = 0.15
 
-
-# ---------------------------------------------------------
-# DBU DATE RANGE
-# ---------------------------------------------------------
-# Automatically use the last 30 days.
-# No DBU/cost date filters are displayed.
-# ---------------------------------------------------------
-
+# DBU usage period - last 30 days
 USAGE_END_DATE = datetime.now(
     timezone.utc
 ).date()
@@ -75,7 +61,7 @@ except Exception as e:
 
 
 # =========================================================
-# AUTHENTICATION
+# CURRENT USER
 # =========================================================
 
 try:
@@ -278,16 +264,74 @@ def get_job_runs(job_id):
 
 
 # =========================================================
-# GET DBU USAGE
+# FIND SQL WAREHOUSE
+# =========================================================
+
+@st.cache_data(ttl=300)
+def get_sql_warehouse_id():
+
+    try:
+
+        warehouses = list(
+            w.warehouses.list()
+        )
+
+        if not warehouses:
+
+            return None
+
+        # Prefer a running warehouse
+        for warehouse in warehouses:
+
+            try:
+
+                if (
+                    warehouse.state
+                    and
+                    warehouse.state.value
+                    == "RUNNING"
+                ):
+
+                    return warehouse.id
+
+            except Exception:
+
+                continue
+
+        # If no warehouse is running,
+        # return the first available warehouse.
+        return warehouses[0].id
+
+    except Exception as e:
+
+        st.error(
+            "Unable to find a SQL Warehouse."
+        )
+
+        st.exception(e)
+
+        return None
+
+
+# =========================================================
+# GET JOB DBU USAGE
 # =========================================================
 #
 # Uses:
-#     system.billing.usage
 #
-# through:
-#     Databricks SQL Statement Execution API
+# system.billing.usage
 #
-# Does NOT use spark.sql()
+# Job ID:
+#
+# usage_metadata.job_id
+#
+# DBU:
+#
+# SUM(usage_quantity)
+#
+# No spark.sql()
+# No Streamlit secrets
+# No Account API
 #
 # =========================================================
 
@@ -295,23 +339,15 @@ def get_job_runs(job_id):
 def get_job_dbu_usage():
 
     # -----------------------------------------------------
-    # SQL Warehouse ID
+    # Find SQL Warehouse
     # -----------------------------------------------------
 
-    warehouse_id = st.secrets.get(
-        "SQL_WAREHOUSE_ID",
-        None
-    )
+    warehouse_id = get_sql_warehouse_id()
 
     if not warehouse_id:
 
         st.error(
-            "SQL_WAREHOUSE_ID is not configured."
-        )
-
-        st.info(
-            "Add SQL_WAREHOUSE_ID to "
-            ".streamlit/secrets.toml"
+            "No SQL Warehouse was found."
         )
 
         return pd.DataFrame(
@@ -343,7 +379,8 @@ def get_job_dbu_usage():
     try:
 
         # -------------------------------------------------
-        # Execute SQL using Statement Execution API
+        # Execute SQL using Databricks Statement Execution
+        # API
         # -------------------------------------------------
 
         response = (
@@ -357,7 +394,7 @@ def get_job_dbu_usage():
 
 
         # -------------------------------------------------
-        # Check status
+        # Check response status
         # -------------------------------------------------
 
         if response.status is None:
@@ -407,7 +444,7 @@ def get_job_dbu_usage():
 
 
         # -------------------------------------------------
-        # Get result
+        # Get SQL result
         # -------------------------------------------------
 
         result = response.result
@@ -463,7 +500,7 @@ def get_job_dbu_usage():
                 rows.append(
                     {
                         "job_id":
-                            str(job_id),
+                            str(job_id).strip(),
 
                         "dbu_usage":
                             dbu_value
@@ -472,7 +509,7 @@ def get_job_dbu_usage():
 
 
         # -------------------------------------------------
-        # No records
+        # No data
         # -------------------------------------------------
 
         if not rows:
@@ -486,17 +523,13 @@ def get_job_dbu_usage():
 
 
         # -------------------------------------------------
-        # DataFrame
+        # Create DataFrame
         # -------------------------------------------------
 
         df = pd.DataFrame(
             rows
         )
 
-
-        # -------------------------------------------------
-        # Normalize
-        # -------------------------------------------------
 
         df["job_id"] = (
             df["job_id"]
@@ -545,7 +578,7 @@ if not jobs:
     )
 
     st.info(
-        "Check the App service principal permissions."
+        "Check the Databricks App permissions."
     )
 
     st.stop()
@@ -632,7 +665,7 @@ with refresh_col2:
 
 
 # =========================================================
-# FILTER SECTION
+# FILTERS
 # =========================================================
 
 st.subheader(
@@ -651,14 +684,12 @@ filter_col1, filter_col2, filter_col3 = st.columns(
 
 with filter_col1:
 
-    workspace_options = [
-        "All Workspaces",
-        "Databricks Workspace"
-    ]
-
     selected_workspace = st.selectbox(
         "Workspace",
-        workspace_options
+        [
+            "All Workspaces",
+            "Databricks Workspace"
+        ]
     )
 
 
@@ -715,21 +746,15 @@ with filter_col3:
 filtered_jobs = jobs.copy()
 
 
-# ---------------------------------------------------------
-# WORKSPACE FILTER
-# ---------------------------------------------------------
+# Workspace filter
+# Currently the app connects to one workspace.
 
 if selected_workspace != "All Workspaces":
-
-    # Current implementation is for the
-    # connected workspace.
 
     filtered_jobs = filtered_jobs
 
 
-# ---------------------------------------------------------
-# JOB NAME FILTER
-# ---------------------------------------------------------
+# Job name filter
 
 if selected_jobs:
 
@@ -741,9 +766,7 @@ if selected_jobs:
     ]
 
 
-# ---------------------------------------------------------
-# CREATED BY FILTER
-# ---------------------------------------------------------
+# Created by filter
 
 if selected_user != "All Users":
 
@@ -806,7 +829,7 @@ for job in filtered_jobs:
 
 
     # -----------------------------------------------------
-    # ROW
+    # CREATE ROW
     # -----------------------------------------------------
 
     job_information.append(
