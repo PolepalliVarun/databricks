@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 # CONSTANTS
 # =========================================================
 
-# Your Databricks workspace display name
+# Workspace display name
 WORKSPACE_NAME = "workspace"
 
 # DBU usage period
@@ -28,12 +28,10 @@ USAGE_START_DATE = (
 
 @st.cache_resource
 def get_databricks_client():
-
     return WorkspaceClient()
 
 
 try:
-
     w = get_databricks_client()
 
 except Exception as e:
@@ -80,13 +78,9 @@ except Exception:
 def format_timestamp(timestamp):
 
     if timestamp is None:
-
         return "-"
 
     try:
-
-        # Databricks timestamps are generally
-        # represented as milliseconds.
 
         dt = datetime.fromtimestamp(
             timestamp / 1000,
@@ -173,11 +167,12 @@ def get_created_time(job):
 def get_updated_time(job):
 
     """
-    Different Databricks SDK versions can expose
+    Different Databricks SDK versions may expose
     different job metadata fields.
 
-    We intentionally use getattr() so that a missing
-    field such as change_time does not crash the app.
+    getattr() is used to avoid errors such as:
+
+        BaseJob object has no attribute change_time
     """
 
     possible_fields = [
@@ -213,6 +208,85 @@ def get_updated_time(job):
             continue
 
     return "-"
+
+
+# =========================================================
+# HELPER - GET RUN RESULT STATE
+# =========================================================
+
+def get_run_result_state(run):
+
+    """
+    Returns the final result state of a job run.
+
+    Examples:
+
+        SUCCESS
+        FAILED
+        TIMED_OUT
+        CANCELED
+
+    If a final result state is not available,
+    the lifecycle state is returned.
+    """
+
+    # -----------------------------------------------------
+    # Try final result state
+    # -----------------------------------------------------
+
+    try:
+
+        if (
+            run.state
+            and run.state.result_state
+        ):
+
+            result_state = (
+                run.state
+                .result_state
+                .value
+            )
+
+            if result_state:
+
+                return str(
+                    result_state
+                )
+
+    except Exception:
+
+        pass
+
+
+    # -----------------------------------------------------
+    # Try lifecycle state
+    # -----------------------------------------------------
+
+    try:
+
+        if (
+            run.state
+            and run.state.life_cycle_state
+        ):
+
+            lifecycle_state = (
+                run.state
+                .life_cycle_state
+                .value
+            )
+
+            if lifecycle_state:
+
+                return str(
+                    lifecycle_state
+                )
+
+    except Exception:
+
+        pass
+
+
+    return "UNKNOWN"
 
 
 # =========================================================
@@ -302,7 +376,7 @@ def get_sql_warehouse_id():
             return None
 
         # -------------------------------------------------
-        # Prefer a RUNNING warehouse
+        # Prefer RUNNING warehouse
         # -------------------------------------------------
 
         for warehouse in warehouses:
@@ -323,7 +397,7 @@ def get_sql_warehouse_id():
                 continue
 
         # -------------------------------------------------
-        # Otherwise use the first warehouse
+        # Otherwise use first warehouse
         # -------------------------------------------------
 
         return warehouses[0].id
@@ -360,8 +434,9 @@ def get_job_dbu_usage():
 
         return empty_df
 
+
     # =====================================================
-    # SYSTEM.BILLING.USAGE QUERY
+    # DBU QUERY
     # =====================================================
 
     query = f"""
@@ -398,6 +473,7 @@ def get_job_dbu_usage():
         dbu_usage DESC
     """
 
+
     try:
 
         response = (
@@ -409,15 +485,18 @@ def get_job_dbu_usage():
             )
         )
 
+
         if response.status is None:
 
             return empty_df
+
 
         status = (
             response.status
             .state
             .value
         )
+
 
         if status != "SUCCEEDED":
 
@@ -429,13 +508,17 @@ def get_job_dbu_usage():
 
             return empty_df
 
+
         result = response.result
+
 
         if result is None:
 
             return empty_df
 
+
         rows = []
+
 
         if result.data_array:
 
@@ -445,13 +528,16 @@ def get_job_dbu_usage():
 
                     continue
 
+
                 job_id = row[0]
 
                 dbu_value = row[1]
 
+
                 if job_id is None:
 
                     continue
+
 
                 try:
 
@@ -462,6 +548,7 @@ def get_job_dbu_usage():
                 except Exception:
 
                     dbu_value = 0.0
+
 
                 rows.append(
                     {
@@ -475,17 +562,23 @@ def get_job_dbu_usage():
                     }
                 )
 
+
         if not rows:
 
             return empty_df
 
-        df = pd.DataFrame(rows)
+
+        df = pd.DataFrame(
+            rows
+        )
+
 
         df["job_id"] = (
             df["job_id"]
             .astype(str)
             .str.strip()
         )
+
 
         df["dbu_usage"] = (
             pd.to_numeric(
@@ -494,6 +587,7 @@ def get_job_dbu_usage():
             )
             .fillna(0.0)
         )
+
 
         # -------------------------------------------------
         # Remove duplicate Job IDs
@@ -507,7 +601,9 @@ def get_job_dbu_usage():
             .sum()
         )
 
+
         return df
+
 
     except Exception as e:
 
@@ -531,6 +627,7 @@ refresh_col1, refresh_col2 = st.columns(
     [8, 1]
 )
 
+
 with refresh_col2:
 
     if st.button(
@@ -547,6 +644,7 @@ with refresh_col2:
 # =========================================================
 
 jobs_result = get_jobs()
+
 
 if isinstance(
     jobs_result,
@@ -594,7 +692,7 @@ st.success(
 
 
 # =========================================================
-# LOAD DBU USAGE
+# LOAD DBU
 # =========================================================
 
 with st.spinner(
@@ -612,6 +710,7 @@ with st.spinner(
 
 dbu_lookup = {}
 
+
 if not job_dbu_df.empty:
 
     for _, row in (
@@ -624,11 +723,13 @@ if not job_dbu_df.empty:
                 row["job_id"]
             ).strip()
 
+
             dbu_lookup[job_id] = (
                 float(
                     row["dbu_usage"]
                 )
             )
+
 
         except Exception:
 
@@ -642,6 +743,7 @@ if not job_dbu_df.empty:
 st.subheader(
     "🔎 Filters"
 )
+
 
 filter_col1, filter_col2, filter_col3 = (
     st.columns(3)
@@ -658,6 +760,7 @@ with filter_col1:
         "All Workspaces",
         WORKSPACE_NAME
     ]
+
 
     selected_workspace = st.selectbox(
         "Workspace",
@@ -677,6 +780,7 @@ job_names = sorted(
         )
     )
 )
+
 
 with filter_col2:
 
@@ -701,6 +805,7 @@ created_by_values = sorted(
     )
 )
 
+
 with filter_col3:
 
     selected_user = st.selectbox(
@@ -714,6 +819,7 @@ with filter_col3:
 # =========================================================
 
 filtered_jobs = jobs.copy()
+
 
 if (
     selected_workspace
@@ -735,7 +841,7 @@ if (
 
 
 # =========================================================
-# APPLY JOB FILTER
+# APPLY JOB NAME FILTER
 # =========================================================
 
 if selected_jobs:
@@ -755,7 +861,7 @@ if selected_jobs:
 
 
 # =========================================================
-# APPLY CREATED-BY FILTER
+# APPLY CREATED BY FILTER
 # =========================================================
 
 if (
@@ -788,14 +894,16 @@ st.info(
 
 
 # =========================================================
-# JOB INFORMATION
+# TABLE 1 - JOB INFORMATION
 # =========================================================
 
 st.subheader(
     "1️⃣ Job Information"
 )
 
+
 job_information = []
+
 
 for job in filtered_jobs:
 
@@ -803,10 +911,12 @@ for job in filtered_jobs:
         job["job_id"]
     ).strip()
 
+
     dbu_usage = dbu_lookup.get(
         job_id,
         0.0
     )
+
 
     job_information.append(
         {
@@ -843,19 +953,23 @@ if job_information:
         job_information
     )
 
+
     st.dataframe(
         job_information_df,
         use_container_width=True,
         hide_index=True,
         column_config={
+
             "DBU Usage":
                 st.column_config
                 .NumberColumn(
                     "DBU Usage",
                     format="%.4f"
                 )
+
         }
     )
+
 
 else:
 
@@ -865,14 +979,16 @@ else:
 
 
 # =========================================================
-# JOB RUN SUMMARY
+# TABLE 2 - JOB RUN SUMMARY
 # =========================================================
 
 st.subheader(
     "2️⃣ Job Run Summary"
 )
 
+
 run_summary = []
+
 
 for job in filtered_jobs:
 
@@ -880,17 +996,21 @@ for job in filtered_jobs:
 
     job_name = job["job_name"]
 
+
     runs = get_job_runs(
         job_id
     )
+
 
     total_runs = len(
         runs
     )
 
+
     success_runs = 0
 
     failed_runs = 0
+
 
     # =====================================================
     # PROCESS RUNS
@@ -905,12 +1025,22 @@ for job in filtered_jobs:
             .upper()
         )
 
+
+        # -------------------------------------------------
+        # SUCCESS
+        # -------------------------------------------------
+
         if status in [
             "SUCCESS",
             "SUCCEEDED"
         ]:
 
             success_runs += 1
+
+
+        # -------------------------------------------------
+        # FAILED
+        # -------------------------------------------------
 
         elif status in [
             "FAILED",
@@ -930,6 +1060,7 @@ for job in filtered_jobs:
         + failed_runs
     )
 
+
     if completed_runs > 0:
 
         success_ratio = (
@@ -943,7 +1074,7 @@ for job in filtered_jobs:
 
 
     # =====================================================
-    # ADD SUMMARY ROW
+    # ADD SUMMARY
     # =====================================================
 
     run_summary.append(
@@ -982,11 +1113,13 @@ if run_summary:
         run_summary
     )
 
+
     st.dataframe(
         run_summary_df,
         use_container_width=True,
         hide_index=True
     )
+
 
 else:
 
@@ -1001,24 +1134,29 @@ else:
 
 st.divider()
 
+
 total_jobs = len(
     filtered_jobs
 )
+
 
 total_runs = sum(
     row["Total Runs"]
     for row in run_summary
 )
 
+
 successful_runs = sum(
     row["Success Runs"]
     for row in run_summary
 )
 
+
 failed_runs = sum(
     row["Failed Runs"]
     for row in run_summary
 )
+
 
 total_dbu = sum(
     row["DBU Usage"]
@@ -1077,11 +1215,13 @@ with col5:
 
 st.divider()
 
+
 st.caption(
     f"DBU Usage Period: "
     f"{USAGE_START_DATE} → "
     f"{USAGE_END_DATE}"
 )
+
 
 st.caption(
     "Cost calculation is currently disabled."
