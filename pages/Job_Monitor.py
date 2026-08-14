@@ -35,12 +35,17 @@ def get_databricks_client():
 
 
 try:
+
     w = get_databricks_client()
 
 except Exception as e:
 
-    st.error("Unable to create Databricks client.")
+    st.error(
+        "Unable to create Databricks client."
+    )
+
     st.exception(e)
+
     st.stop()
 
 
@@ -53,11 +58,60 @@ try:
     current_user = w.current_user.me()
 
     st.caption(
-        f"Authenticated as: {current_user.user_name}"
+        f"Authenticated as: "
+        f"{current_user.user_name}"
     )
 
 except Exception:
-    pass
+
+    current_user = None
+
+
+# =========================================================
+# GET WORKSPACE NAME
+# =========================================================
+
+@st.cache_data(ttl=3600)
+def get_workspace_name():
+
+    try:
+
+        # WorkspaceClient host normally contains:
+        # https://<workspace-name-or-id>.cloud.databricks.com
+
+        host = getattr(
+            w.config,
+            "host",
+            None
+        )
+
+        if host:
+
+            host = str(host).strip()
+
+            host = host.replace(
+                "https://",
+                ""
+            )
+
+            host = host.replace(
+                "http://",
+                ""
+            )
+
+            host = host.rstrip("/")
+
+            # Keep hostname as workspace identifier
+            return host
+
+    except Exception:
+
+        pass
+
+    return "Current Workspace"
+
+
+WORKSPACE_NAME = get_workspace_name()
 
 
 # =========================================================
@@ -67,11 +121,11 @@ except Exception:
 def format_timestamp(timestamp):
 
     if timestamp is None:
+
         return "-"
 
     try:
 
-        # Databricks API timestamps are normally milliseconds
         dt = datetime.fromtimestamp(
             timestamp / 1000,
             tz=timezone.utc
@@ -94,10 +148,15 @@ def get_job_name(job):
 
     try:
 
-        if job.settings and job.settings.name:
+        if (
+            job.settings
+            and job.settings.name
+        ):
+
             return job.settings.name
 
     except Exception:
+
         pass
 
     return f"Job {job.job_id}"
@@ -112,9 +171,11 @@ def get_job_creator(job):
     try:
 
         if job.creator_user_name:
+
             return job.creator_user_name
 
     except Exception:
+
         pass
 
     return "-"
@@ -134,7 +195,9 @@ def get_created_time(job):
             None
         )
 
-        return format_timestamp(value)
+        return format_timestamp(
+            value
+        )
 
     except Exception:
 
@@ -146,13 +209,6 @@ def get_created_time(job):
 # =========================================================
 
 def get_updated_time(job):
-
-    """
-    Databricks BaseJob does not expose change_time.
-
-    Different SDK/API versions can expose job metadata
-    differently, so check supported fields safely.
-    """
 
     possible_fields = [
         "updated_time",
@@ -204,6 +260,7 @@ def get_run_result_state(run):
             )
 
     except Exception:
+
         pass
 
     return "UNKNOWN"
@@ -223,11 +280,14 @@ def get_jobs():
         for job in w.jobs.list():
 
             if job.job_id is None:
-                continue
 
+                continue
 
             jobs.append(
                 {
+                    "workspace_name":
+                        WORKSPACE_NAME,
+
                     "job_id":
                         job.job_id,
 
@@ -245,9 +305,7 @@ def get_jobs():
                 }
             )
 
-
         return jobs
-
 
     except Exception as e:
 
@@ -290,10 +348,9 @@ def get_sql_warehouse_id():
             w.warehouses.list()
         )
 
-
         if not warehouses:
-            return None
 
+            return None
 
         # Prefer running warehouse
 
@@ -314,11 +371,7 @@ def get_sql_warehouse_id():
 
                 continue
 
-
-        # Otherwise use first warehouse
-
         return warehouses[0].id
-
 
     except Exception:
 
@@ -339,11 +392,9 @@ def get_job_dbu_usage():
         ]
     )
 
-
     warehouse_id = (
         get_sql_warehouse_id()
     )
-
 
     if not warehouse_id:
 
@@ -384,6 +435,7 @@ def get_job_dbu_usage():
 
 
         if response.status is None:
+
             return empty_df
 
 
@@ -409,6 +461,7 @@ def get_job_dbu_usage():
 
 
         if result is None:
+
             return empty_df
 
 
@@ -420,8 +473,8 @@ def get_job_dbu_usage():
             for row in result.data_array:
 
                 if len(row) < 2:
-                    continue
 
+                    continue
 
                 job_id = row[0]
 
@@ -429,6 +482,7 @@ def get_job_dbu_usage():
 
 
                 if job_id is None:
+
                     continue
 
 
@@ -457,6 +511,7 @@ def get_job_dbu_usage():
 
 
         if not rows:
+
             return empty_df
 
 
@@ -595,7 +650,6 @@ if not job_dbu_df.empty:
                 row["job_id"]
             ).strip()
 
-
             dbu_lookup[job_id] = float(
                 row["dbu_usage"]
             )
@@ -614,9 +668,33 @@ st.subheader(
 )
 
 
-filter_col1, filter_col2 = st.columns(
-    2
+filter_col1, filter_col2, filter_col3 = (
+    st.columns(3)
 )
+
+
+# =========================================================
+# WORKSPACE NAME FILTER
+# =========================================================
+
+workspace_names = sorted(
+    list(
+        set(
+            job["workspace_name"]
+            for job in jobs
+            if job.get("workspace_name")
+        )
+    )
+)
+
+
+with filter_col1:
+
+    selected_workspace = st.selectbox(
+        "Workspace Name",
+        ["All Workspaces"] +
+        workspace_names
+    )
 
 
 # =========================================================
@@ -633,7 +711,7 @@ job_names = sorted(
 )
 
 
-with filter_col1:
+with filter_col2:
 
     selected_jobs = st.multiselect(
         "Job Name",
@@ -657,7 +735,7 @@ created_by_values = sorted(
 )
 
 
-with filter_col2:
+with filter_col3:
 
     selected_user = st.selectbox(
         "Created By",
@@ -673,6 +751,24 @@ with filter_col2:
 filtered_jobs = jobs.copy()
 
 
+# ---------------------------------------------------------
+# WORKSPACE FILTER
+# ---------------------------------------------------------
+
+if selected_workspace != "All Workspaces":
+
+    filtered_jobs = [
+        job
+        for job in filtered_jobs
+        if job["workspace_name"]
+        == selected_workspace
+    ]
+
+
+# ---------------------------------------------------------
+# JOB NAME FILTER
+# ---------------------------------------------------------
+
 if selected_jobs:
 
     filtered_jobs = [
@@ -682,6 +778,10 @@ if selected_jobs:
         in selected_jobs
     ]
 
+
+# ---------------------------------------------------------
+# USER FILTER
+# ---------------------------------------------------------
 
 if selected_user != "All Users":
 
@@ -693,6 +793,10 @@ if selected_user != "All Users":
     ]
 
 
+# =========================================================
+# FILTER RESULT
+# =========================================================
+
 st.info(
     f"Showing **{len(filtered_jobs)}** "
     f"of **{len(jobs)}** jobs"
@@ -700,7 +804,7 @@ st.info(
 
 
 # =========================================================
-# TABLE 1
+# TABLE 1 - JOB INFORMATION
 # =========================================================
 
 st.subheader(
@@ -727,7 +831,7 @@ for job in filtered_jobs:
     job_information.append(
         {
             "Workspace Name":
-                "Databricks Workspace",
+                job["workspace_name"],
 
             "Job Name":
                 job["job_name"],
@@ -783,7 +887,7 @@ else:
 
 
 # =========================================================
-# TABLE 2 - RUN SUMMARY
+# TABLE 2 - JOB RUN SUMMARY
 # =========================================================
 
 st.subheader(
@@ -809,6 +913,7 @@ for job in filtered_jobs:
     total_runs = len(
         runs
     )
+
 
     success_runs = 0
 
@@ -862,6 +967,9 @@ for job in filtered_jobs:
 
     run_summary.append(
         {
+            "Workspace Name":
+                job["workspace_name"],
+
             "Job Name":
                 job_name,
 
@@ -939,8 +1047,8 @@ total_dbu = sum(
 )
 
 
-col1, col2, col3, col4, col5 = st.columns(
-    5
+col1, col2, col3, col4, col5 = (
+    st.columns(5)
 )
 
 
@@ -990,10 +1098,13 @@ with col5:
 
 st.divider()
 
+
 st.caption(
     f"DBU Usage Period: "
-    f"{USAGE_START_DATE} → {USAGE_END_DATE}"
+    f"{USAGE_START_DATE} → "
+    f"{USAGE_END_DATE}"
 )
+
 
 st.caption(
     "Cost calculation is currently disabled."
