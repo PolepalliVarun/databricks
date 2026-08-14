@@ -20,6 +20,70 @@ st.markdown(
 )
 
 
+
+# =========================================================
+# APPLICATION FEATURES
+# =========================================================
+
+st.header("Application Features")
+
+
+col1, col2, col3 = st.columns(3)
+
+
+with col1:
+
+    st.subheader("📊 Job Monitor")
+
+    st.write(
+        """
+        Monitor Databricks jobs and job runs.
+
+        - Job information
+        - Job IDs
+        - Created date
+        - Last update
+        - Created by
+        - Job run status
+        - Success ratio
+        - DBU usage
+        """
+    )
+
+
+with col2:
+
+    st.subheader("🤖 AI Analysis")
+
+    st.write(
+        """
+        Ask questions about the job data using
+        natural language.
+
+        Examples:
+
+        - Which jobs use the most DBUs?
+        - Which jobs are failing?
+        - Which jobs need attention?
+        - Summarize job health.
+        - Give recommendations.
+        """
+    )
+
+
+with col3:
+
+    st.subheader("📘 App Context")
+
+    st.write(
+        """
+        Understand the purpose and architecture
+        of the application.
+        """
+    )
+
+
+
 # =========================================================
 # 1. APPLICATION OVERVIEW
 # =========================================================
@@ -206,29 +270,32 @@ st.header(
     "5. Application Architecture"
 )
 
+
 st.code(
     """
-                    Databricks Workspace
-                           |
-             +-------------+-------------+
-             |                           |
-             v                           v
-      Databricks Jobs API        system.billing.usage
-             |                           |
-             v                           v
-        Job Details                  DBU Usage
-             |                           |
-             |                     job_id mapping
-             |                           |
-             +-------------+-------------+
-                           |
-                           v
-                    Streamlit Application
-                           |
-             +-------------+-------------+
-             |                           |
-             v                           v
-       Job Monitor                 App Context
+    Databricks Workspace
+             |
+             +------------------------+
+             |                        |
+             v                        v
+      Databricks Jobs API      system.billing.usage
+             |                        |
+             v                        v
+        Job Details               DBU Usage
+             |                        |
+             +------------+-----------+
+                          |
+                          v
+                 Streamlit Dashboard
+                          |
+             +------------+------------+
+             |                         |
+             v                         v
+        Job Monitor              AI Analysis
+                                       |
+                                       v
+                              Databricks Model
+                                  Serving
     """,
     language="text"
 )
