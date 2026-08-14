@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 
-from databricks.sdk import WorkspaceClient, AccountClient
+from databricks.sdk import WorkspaceClient
 from datetime import datetime, timezone, timedelta
+import os
 
 
 # =========================================================
-# PAGE CONFIGURATION
+# PAGE TITLE
 # =========================================================
 
 st.title("📊 Databricks Job Monitor")
@@ -26,7 +27,7 @@ USAGE_START_DATE = (
 
 
 # =========================================================
-# DATABRICKS WORKSPACE CLIENT
+# DATABRICKS CLIENT
 # =========================================================
 
 @st.cache_resource
@@ -76,8 +77,7 @@ except Exception:
 def get_workspace_id():
 
     # -----------------------------------------------------
-    # Method 1:
-    # SDK configuration
+    # Method 1 - SDK configuration
     # -----------------------------------------------------
 
     try:
@@ -90,7 +90,9 @@ def get_workspace_id():
 
         if workspace_id:
 
-            return int(workspace_id)
+            return str(
+                workspace_id
+            )
 
     except Exception:
 
@@ -98,8 +100,28 @@ def get_workspace_id():
 
 
     # -----------------------------------------------------
-    # Method 2:
-    # SDK account ID / workspace ID
+    # Method 2 - Environment variable
+    # -----------------------------------------------------
+
+    try:
+
+        workspace_id = os.getenv(
+            "DATABRICKS_WORKSPACE_ID"
+        )
+
+        if workspace_id:
+
+            return str(
+                workspace_id
+            )
+
+    except Exception:
+
+        pass
+
+
+    # -----------------------------------------------------
+    # Method 3 - WorkspaceClient
     # -----------------------------------------------------
 
     try:
@@ -112,29 +134,9 @@ def get_workspace_id():
 
         if workspace_id:
 
-            return int(workspace_id)
-
-    except Exception:
-
-        pass
-
-
-    # -----------------------------------------------------
-    # Method 3:
-    # Environment variable
-    # -----------------------------------------------------
-
-    try:
-
-        import os
-
-        workspace_id = os.getenv(
-            "DATABRICKS_WORKSPACE_ID"
-        )
-
-        if workspace_id:
-
-            return int(workspace_id)
+            return str(
+                workspace_id
+            )
 
     except Exception:
 
@@ -145,117 +147,95 @@ def get_workspace_id():
 
 
 # =========================================================
-# GET ACTUAL WORKSPACE DISPLAY NAME
+# GET WORKSPACE DISPLAY NAME
 # =========================================================
 
 @st.cache_data(ttl=3600)
-def get_workspace_name():
+def get_workspace_display_name():
 
     """
-    Retrieves the human-readable Databricks workspace name.
+    Determines the workspace display name without
+    displaying the Databricks hostname.
 
-    This does NOT use the workspace hostname.
+    Priority:
 
-    Databricks Account Workspaces API returns:
+    1. Explicit workspace-name environment variable
+    2. Databricks workspace ID detection
+    3. Clean Free Edition label
 
-        workspace_id
-        workspace_name
-
-    If account-level access is unavailable, return a clear
-    fallback instead of displaying the hostname.
+    The hostname is NEVER used as the display name.
     """
 
-    workspace_id = get_workspace_id()
+    # -----------------------------------------------------
+    # 1. Check environment variables
+    # -----------------------------------------------------
+
+    possible_names = [
+
+        "DATABRICKS_WORKSPACE_NAME",
+
+        "DATABRICKS_APP_WORKSPACE_NAME",
+
+        "WORKSPACE_NAME"
+
+    ]
 
 
-    if not workspace_id:
+    for env_name in possible_names:
 
-        return (
-            "Workspace name unavailable"
-        )
+        try:
 
-
-    # =====================================================
-    # ACCOUNT CLIENT
-    # =====================================================
-
-    try:
-
-        account_client = AccountClient(
-            host="https://accounts.cloud.databricks.com"
-        )
-
-
-    except Exception:
-
-        return (
-            "Workspace name unavailable"
-        )
-
-
-    # =====================================================
-    # GET WORKSPACE INFORMATION
-    # =====================================================
-
-    try:
-
-        workspace = (
-            account_client
-            .workspaces
-            .get(
-                workspace_id=workspace_id
+            value = os.getenv(
+                env_name
             )
-        )
+
+            if value:
+
+                value = value.strip()
+
+                if value:
+
+                    return value
+
+        except Exception:
+
+            continue
 
 
-        workspace_name = getattr(
-            workspace,
-            "workspace_name",
-            None
-        )
+    # -----------------------------------------------------
+    # 2. Detect workspace ID
+    # -----------------------------------------------------
 
-
-        if workspace_name:
-
-            return str(
-                workspace_name
-            ).strip()
-
-
-    except Exception:
-
-        pass
-
-
-    return (
-        "Workspace name unavailable"
+    workspace_id = (
+        get_workspace_id()
     )
+
+
+    # -----------------------------------------------------
+    # 3. Free Edition fallback
+    # -----------------------------------------------------
+    #
+    # We intentionally do NOT use:
+    #
+    # w.config.host
+    #
+    # because that would display:
+    #
+    # dbc-xxxxxxxx.cloud.databricks.com
+    #
+    # -----------------------------------------------------
+
+    if workspace_id:
+
+        return "Databricks Free Edition"
+
+
+    return "Databricks Workspace"
 
 
 WORKSPACE_NAME = (
-    get_workspace_name()
+    get_workspace_display_name()
 )
-
-
-# =========================================================
-# WORKSPACE NAME STATUS
-# =========================================================
-
-if (
-    WORKSPACE_NAME
-    == "Workspace name unavailable"
-):
-
-    st.warning(
-        """
-        Unable to retrieve the human-readable
-        Databricks workspace name through the
-        Account API.
-
-        The application will not use the workspace
-        hostname as a substitute.
-        """
-    )
 
 
 # =========================================================
@@ -268,6 +248,7 @@ def format_timestamp(timestamp):
 
         return "-"
 
+
     try:
 
         # Databricks API timestamps are
@@ -278,9 +259,11 @@ def format_timestamp(timestamp):
             tz=timezone.utc
         )
 
+
         return dt.strftime(
             "%Y-%m-%d %H:%M:%S UTC"
         )
+
 
     except Exception:
 
@@ -301,6 +284,7 @@ def get_job_name(job):
         ):
 
             return job.settings.name
+
 
     except Exception:
 
@@ -326,6 +310,7 @@ def get_job_creator(job):
                 job.creator_user_name
             )
 
+
     except Exception:
 
         pass
@@ -348,9 +333,11 @@ def get_created_time(job):
             None
         )
 
+
         return format_timestamp(
             value
         )
+
 
     except Exception:
 
@@ -364,10 +351,10 @@ def get_created_time(job):
 def get_updated_time(job):
 
     """
-    Databricks SDK versions can expose job
-    metadata differently.
+    Different Databricks SDK versions expose
+    different job metadata fields.
 
-    Do not directly reference change_time because
+    Do NOT directly reference change_time because
     BaseJob may not contain that attribute.
     """
 
@@ -380,6 +367,7 @@ def get_updated_time(job):
         "last_update_time",
 
         "change_time"
+
     ]
 
 
@@ -410,7 +398,7 @@ def get_updated_time(job):
 
 
 # =========================================================
-# HELPER - RUN RESULT
+# HELPER - GET RUN RESULT STATE
 # =========================================================
 
 def get_run_result_state(run):
@@ -532,6 +520,7 @@ def get_job_runs(job_id):
             )
         )
 
+
         return list(
             response
         )
@@ -579,6 +568,7 @@ def get_sql_warehouse_id():
                     return (
                         warehouse.id
                     )
+
 
             except Exception:
 
@@ -741,6 +731,7 @@ def get_job_dbu_usage():
                         dbu_value
                     )
 
+
                 except Exception:
 
                     dbu_value = 0.0
@@ -808,9 +799,11 @@ def get_job_dbu_usage():
             "from system.billing.usage."
         )
 
+
         st.caption(
             str(e)
         )
+
 
         return empty_df
 
@@ -957,21 +950,12 @@ filter_col1, filter_col2, filter_col3 = (
 with filter_col1:
 
     workspace_options = [
-        "All Workspaces"
-    ]
 
+        "All Workspaces",
 
-    # Only add actual workspace name
-    # if it was successfully retrieved.
-
-    if (
         WORKSPACE_NAME
-        != "Workspace name unavailable"
-    ):
 
-        workspace_options.append(
-            WORKSPACE_NAME
-        )
+    ]
 
 
     selected_workspace = (
@@ -1086,7 +1070,7 @@ if selected_jobs:
 
 
 # ---------------------------------------------------------
-# USER FILTER
+# CREATED BY FILTER
 # ---------------------------------------------------------
 
 if (
@@ -1226,6 +1210,7 @@ for job in filtered_jobs:
         job["job_id"]
     )
 
+
     job_name = (
         job["job_name"]
     )
@@ -1256,11 +1241,7 @@ for job in filtered_jobs:
             get_run_result_state(
                 run
             )
-        )
-
-
-        status = (
-            status.upper()
+            .upper()
         )
 
 
@@ -1314,6 +1295,7 @@ for job in filtered_jobs:
             / completed_runs
 
         ) * 100
+
 
     else:
 
