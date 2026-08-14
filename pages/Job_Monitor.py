@@ -6,17 +6,6 @@ from datetime import datetime, timezone, timedelta
 
 
 # =========================================================
-# PAGE CONFIGURATION
-# =========================================================
-
-st.set_page_config(
-    page_title="Databricks Job Monitor",
-    page_icon="📊",
-    layout="wide"
-)
-
-
-# =========================================================
 # CONSTANTS
 # =========================================================
 
