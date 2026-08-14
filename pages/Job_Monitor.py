@@ -3,20 +3,27 @@ import pandas as pd
 
 from databricks.sdk import WorkspaceClient
 from datetime import datetime, timezone, timedelta
-import os
 
 
 # =========================================================
-# PAGE TITLE
+# PAGE CONFIGURATION
 # =========================================================
 
-st.title("📊 Databricks Job Monitor")
+st.set_page_config(
+    page_title="Databricks Job Monitor",
+    page_icon="📊",
+    layout="wide"
+)
 
 
 # =========================================================
-# DBU DATE RANGE
+# CONSTANTS
 # =========================================================
 
+# Your Databricks workspace display name
+WORKSPACE_NAME = "workspace"
+
+# DBU usage period
 USAGE_END_DATE = datetime.now(
     timezone.utc
 ).date()
@@ -52,6 +59,13 @@ except Exception as e:
 
 
 # =========================================================
+# PAGE TITLE
+# =========================================================
+
+st.title("📊 Databricks Job Monitor")
+
+
+# =========================================================
 # CURRENT USER
 # =========================================================
 
@@ -60,182 +74,14 @@ try:
     current_user = w.current_user.me()
 
     st.caption(
-        f"Authenticated as: "
-        f"{current_user.user_name}"
+        f"Authenticated as: {current_user.user_name}"
     )
 
 except Exception:
 
-    current_user = None
-
-
-# =========================================================
-# GET WORKSPACE ID
-# =========================================================
-
-@st.cache_data(ttl=3600)
-def get_workspace_id():
-
-    # -----------------------------------------------------
-    # Method 1 - SDK configuration
-    # -----------------------------------------------------
-
-    try:
-
-        workspace_id = getattr(
-            w.config,
-            "workspace_id",
-            None
-        )
-
-        if workspace_id:
-
-            return str(
-                workspace_id
-            )
-
-    except Exception:
-
-        pass
-
-
-    # -----------------------------------------------------
-    # Method 2 - Environment variable
-    # -----------------------------------------------------
-
-    try:
-
-        workspace_id = os.getenv(
-            "DATABRICKS_WORKSPACE_ID"
-        )
-
-        if workspace_id:
-
-            return str(
-                workspace_id
-            )
-
-    except Exception:
-
-        pass
-
-
-    # -----------------------------------------------------
-    # Method 3 - WorkspaceClient
-    # -----------------------------------------------------
-
-    try:
-
-        workspace_id = getattr(
-            w,
-            "workspace_id",
-            None
-        )
-
-        if workspace_id:
-
-            return str(
-                workspace_id
-            )
-
-    except Exception:
-
-        pass
-
-
-    return None
-
-
-# =========================================================
-# GET WORKSPACE DISPLAY NAME
-# =========================================================
-
-@st.cache_data(ttl=3600)
-def get_workspace_display_name():
-
-    """
-    Determines the workspace display name without
-    displaying the Databricks hostname.
-
-    Priority:
-
-    1. Explicit workspace-name environment variable
-    2. Databricks workspace ID detection
-    3. Clean Free Edition label
-
-    The hostname is NEVER used as the display name.
-    """
-
-    # -----------------------------------------------------
-    # 1. Check environment variables
-    # -----------------------------------------------------
-
-    possible_names = [
-
-        "DATABRICKS_WORKSPACE_NAME",
-
-        "DATABRICKS_APP_WORKSPACE_NAME",
-
-        "WORKSPACE_NAME"
-
-    ]
-
-
-    for env_name in possible_names:
-
-        try:
-
-            value = os.getenv(
-                env_name
-            )
-
-            if value:
-
-                value = value.strip()
-
-                if value:
-
-                    return value
-
-        except Exception:
-
-            continue
-
-
-    # -----------------------------------------------------
-    # 2. Detect workspace ID
-    # -----------------------------------------------------
-
-    workspace_id = (
-        get_workspace_id()
+    st.caption(
+        "Authenticated with Databricks"
     )
-
-
-    # -----------------------------------------------------
-    # 3. Free Edition fallback
-    # -----------------------------------------------------
-    #
-    # We intentionally do NOT use:
-    #
-    # w.config.host
-    #
-    # because that would display:
-    #
-    # dbc-xxxxxxxx.cloud.databricks.com
-    #
-    # -----------------------------------------------------
-
-    if workspace_id:
-
-        return "Databricks Free Edition"
-
-
-    return "Databricks Workspace"
-
-
-WORKSPACE_NAME = (
-    get_workspace_display_name()
-)
 
 
 # =========================================================
@@ -248,22 +94,19 @@ def format_timestamp(timestamp):
 
         return "-"
 
-
     try:
 
-        # Databricks API timestamps are
-        # normally milliseconds.
+        # Databricks timestamps are generally
+        # represented as milliseconds.
 
         dt = datetime.fromtimestamp(
             timestamp / 1000,
             tz=timezone.utc
         )
 
-
         return dt.strftime(
             "%Y-%m-%d %H:%M:%S UTC"
         )
-
 
     except Exception:
 
@@ -285,19 +128,15 @@ def get_job_name(job):
 
             return job.settings.name
 
-
     except Exception:
 
         pass
 
-
-    return (
-        f"Job {job.job_id}"
-    )
+    return f"Job {job.job_id}"
 
 
 # =========================================================
-# HELPER - GET CREATOR
+# HELPER - GET CREATED BY
 # =========================================================
 
 def get_job_creator(job):
@@ -306,15 +145,11 @@ def get_job_creator(job):
 
         if job.creator_user_name:
 
-            return (
-                job.creator_user_name
-            )
-
+            return job.creator_user_name
 
     except Exception:
 
         pass
-
 
     return "-"
 
@@ -333,11 +168,9 @@ def get_created_time(job):
             None
         )
 
-
         return format_timestamp(
             value
         )
-
 
     except Exception:
 
@@ -351,11 +184,11 @@ def get_created_time(job):
 def get_updated_time(job):
 
     """
-    Different Databricks SDK versions expose
+    Different Databricks SDK versions can expose
     different job metadata fields.
 
-    Do NOT directly reference change_time because
-    BaseJob may not contain that attribute.
+    We intentionally use getattr() so that a missing
+    field such as change_time does not crash the app.
     """
 
     possible_fields = [
@@ -370,7 +203,6 @@ def get_updated_time(job):
 
     ]
 
-
     for field in possible_fields:
 
         try:
@@ -381,67 +213,17 @@ def get_updated_time(job):
                 None
             )
 
-
             if value is not None:
 
                 return format_timestamp(
                     value
                 )
 
-
         except Exception:
 
             continue
 
-
     return "-"
-
-
-# =========================================================
-# HELPER - GET RUN RESULT STATE
-# =========================================================
-
-def get_run_result_state(run):
-
-    try:
-
-        if (
-            run.state
-            and run.state.result_state
-        ):
-
-            return (
-                run.state
-                .result_state
-                .value
-            )
-
-
-    except Exception:
-
-        pass
-
-
-    try:
-
-        if (
-            run.state
-            and run.state.life_cycle_state
-        ):
-
-            return (
-                run.state
-                .life_cycle_state
-                .value
-            )
-
-
-    except Exception:
-
-        pass
-
-
-    return "UNKNOWN"
 
 
 # =========================================================
@@ -453,7 +235,6 @@ def get_jobs():
 
     jobs = []
 
-
     try:
 
         for job in w.jobs.list():
@@ -461,7 +242,6 @@ def get_jobs():
             if job.job_id is None:
 
                 continue
-
 
             jobs.append(
                 {
@@ -472,30 +252,20 @@ def get_jobs():
                         job.job_id,
 
                     "job_name":
-                        get_job_name(
-                            job
-                        ),
+                        get_job_name(job),
 
                     "created_time":
-                        get_created_time(
-                            job
-                        ),
+                        get_created_time(job),
 
                     "updated_time":
-                        get_updated_time(
-                            job
-                        ),
+                        get_updated_time(job),
 
                     "created_by":
-                        get_job_creator(
-                            job
-                        )
+                        get_job_creator(job)
                 }
             )
 
-
         return jobs
-
 
     except Exception as e:
 
@@ -513,18 +283,12 @@ def get_job_runs(job_id):
 
     try:
 
-        response = (
-            w.jobs.list_runs(
-                job_id=job_id,
-                limit=25
-            )
+        response = w.jobs.list_runs(
+            job_id=job_id,
+            limit=25
         )
 
-
-        return list(
-            response
-        )
-
+        return list(response)
 
     except Exception:
 
@@ -544,14 +308,12 @@ def get_sql_warehouse_id():
             w.warehouses.list()
         )
 
-
         if not warehouses:
 
             return None
 
-
         # -------------------------------------------------
-        # Prefer RUNNING warehouse
+        # Prefer a RUNNING warehouse
         # -------------------------------------------------
 
         for warehouse in warehouses:
@@ -565,22 +327,17 @@ def get_sql_warehouse_id():
                     == "RUNNING"
                 ):
 
-                    return (
-                        warehouse.id
-                    )
-
+                    return warehouse.id
 
             except Exception:
 
                 continue
 
-
         # -------------------------------------------------
-        # Otherwise use first warehouse
+        # Otherwise use the first warehouse
         # -------------------------------------------------
 
         return warehouses[0].id
-
 
     except Exception:
 
@@ -601,11 +358,9 @@ def get_job_dbu_usage():
         ]
     )
 
-
     warehouse_id = (
         get_sql_warehouse_id()
     )
-
 
     if not warehouse_id:
 
@@ -616,9 +371,8 @@ def get_job_dbu_usage():
 
         return empty_df
 
-
     # =====================================================
-    # DBU QUERY
+    # SYSTEM.BILLING.USAGE QUERY
     # =====================================================
 
     query = f"""
@@ -655,7 +409,6 @@ def get_job_dbu_usage():
         dbu_usage DESC
     """
 
-
     try:
 
         response = (
@@ -667,18 +420,15 @@ def get_job_dbu_usage():
             )
         )
 
-
         if response.status is None:
 
             return empty_df
-
 
         status = (
             response.status
             .state
             .value
         )
-
 
         if status != "SUCCEEDED":
 
@@ -690,40 +440,29 @@ def get_job_dbu_usage():
 
             return empty_df
 
-
-        result = (
-            response.result
-        )
-
+        result = response.result
 
         if result is None:
 
             return empty_df
 
-
         rows = []
-
 
         if result.data_array:
 
-            for row in (
-                result.data_array
-            ):
+            for row in result.data_array:
 
                 if len(row) < 2:
 
                     continue
 
-
                 job_id = row[0]
 
                 dbu_value = row[1]
 
-
                 if job_id is None:
 
                     continue
-
 
                 try:
 
@@ -731,11 +470,9 @@ def get_job_dbu_usage():
                         dbu_value
                     )
 
-
                 except Exception:
 
                     dbu_value = 0.0
-
 
                 rows.append(
                     {
@@ -749,23 +486,17 @@ def get_job_dbu_usage():
                     }
                 )
 
-
         if not rows:
 
             return empty_df
 
-
-        df = pd.DataFrame(
-            rows
-        )
-
+        df = pd.DataFrame(rows)
 
         df["job_id"] = (
             df["job_id"]
             .astype(str)
             .str.strip()
         )
-
 
         df["dbu_usage"] = (
             pd.to_numeric(
@@ -775,9 +506,8 @@ def get_job_dbu_usage():
             .fillna(0.0)
         )
 
-
         # -------------------------------------------------
-        # Prevent duplicate Job IDs
+        # Remove duplicate Job IDs
         # -------------------------------------------------
 
         df = (
@@ -788,9 +518,7 @@ def get_job_dbu_usage():
             .sum()
         )
 
-
         return df
-
 
     except Exception as e:
 
@@ -799,11 +527,9 @@ def get_job_dbu_usage():
             "from system.billing.usage."
         )
 
-
         st.caption(
             str(e)
         )
-
 
         return empty_df
 
@@ -812,12 +538,9 @@ def get_job_dbu_usage():
 # REFRESH BUTTON
 # =========================================================
 
-refresh_col1, refresh_col2 = (
-    st.columns(
-        [8, 1]
-    )
+refresh_col1, refresh_col2 = st.columns(
+    [8, 1]
 )
-
 
 with refresh_col2:
 
@@ -836,7 +559,6 @@ with refresh_col2:
 
 jobs_result = get_jobs()
 
-
 if isinstance(
     jobs_result,
     dict
@@ -846,14 +568,12 @@ if isinstance(
         "Unable to retrieve Databricks jobs."
     )
 
-
     st.code(
         jobs_result.get(
             "error",
             "Unknown error"
         )
     )
-
 
     st.stop()
 
@@ -862,7 +582,7 @@ jobs = jobs_result
 
 
 # =========================================================
-# NO JOBS
+# CHECK JOBS
 # =========================================================
 
 if not jobs:
@@ -885,7 +605,7 @@ st.success(
 
 
 # =========================================================
-# LOAD DBU
+# LOAD DBU USAGE
 # =========================================================
 
 with st.spinner(
@@ -898,11 +618,10 @@ with st.spinner(
 
 
 # =========================================================
-# DBU LOOKUP
+# CREATE DBU LOOKUP
 # =========================================================
 
 dbu_lookup = {}
-
 
 if not job_dbu_df.empty:
 
@@ -916,13 +635,11 @@ if not job_dbu_df.empty:
                 row["job_id"]
             ).strip()
 
-
             dbu_lookup[job_id] = (
                 float(
                     row["dbu_usage"]
                 )
             )
-
 
         except Exception:
 
@@ -930,13 +647,12 @@ if not job_dbu_df.empty:
 
 
 # =========================================================
-# FILTER SECTION
+# FILTERS
 # =========================================================
 
 st.subheader(
     "🔎 Filters"
 )
-
 
 filter_col1, filter_col2, filter_col3 = (
     st.columns(3)
@@ -950,19 +666,13 @@ filter_col1, filter_col2, filter_col3 = (
 with filter_col1:
 
     workspace_options = [
-
         "All Workspaces",
-
         WORKSPACE_NAME
-
     ]
 
-
-    selected_workspace = (
-        st.selectbox(
-            "Workspace",
-            workspace_options
-        )
+    selected_workspace = st.selectbox(
+        "Workspace",
+        workspace_options
     )
 
 
@@ -979,17 +689,12 @@ job_names = sorted(
     )
 )
 
-
 with filter_col2:
 
-    selected_jobs = (
-        st.multiselect(
-            "Job Name",
-            options=job_names,
-            placeholder=(
-                "Select one or more jobs"
-            )
-        )
+    selected_jobs = st.multiselect(
+        "Job Name",
+        options=job_names,
+        placeholder="Select one or more jobs"
     )
 
 
@@ -1007,28 +712,19 @@ created_by_values = sorted(
     )
 )
 
-
 with filter_col3:
 
-    selected_user = (
-        st.selectbox(
-            "Created By",
-            ["All Users"]
-            + created_by_values
-        )
+    selected_user = st.selectbox(
+        "Created By",
+        ["All Users"] + created_by_values
     )
 
 
 # =========================================================
-# APPLY FILTERS
+# APPLY WORKSPACE FILTER
 # =========================================================
 
 filtered_jobs = jobs.copy()
-
-
-# ---------------------------------------------------------
-# WORKSPACE FILTER
-# ---------------------------------------------------------
 
 if (
     selected_workspace
@@ -1049,9 +745,9 @@ if (
     ]
 
 
-# ---------------------------------------------------------
-# JOB NAME FILTER
-# ---------------------------------------------------------
+# =========================================================
+# APPLY JOB FILTER
+# =========================================================
 
 if selected_jobs:
 
@@ -1069,9 +765,9 @@ if selected_jobs:
     ]
 
 
-# ---------------------------------------------------------
-# CREATED BY FILTER
-# ---------------------------------------------------------
+# =========================================================
+# APPLY CREATED-BY FILTER
+# =========================================================
 
 if (
     selected_user
@@ -1103,16 +799,14 @@ st.info(
 
 
 # =========================================================
-# TABLE 1 - JOB INFORMATION
+# JOB INFORMATION
 # =========================================================
 
 st.subheader(
     "1️⃣ Job Information"
 )
 
-
 job_information = []
-
 
 for job in filtered_jobs:
 
@@ -1120,19 +814,15 @@ for job in filtered_jobs:
         job["job_id"]
     ).strip()
 
-
-    dbu_usage = (
-        dbu_lookup.get(
-            job_id,
-            0.0
-        )
+    dbu_usage = dbu_lookup.get(
+        job_id,
+        0.0
     )
-
 
     job_information.append(
         {
             "Workspace Name":
-                job["workspace_name"],
+                WORKSPACE_NAME,
 
             "Job Name":
                 job["job_name"],
@@ -1160,30 +850,23 @@ for job in filtered_jobs:
 
 if job_information:
 
-    job_information_df = (
-        pd.DataFrame(
-            job_information
-        )
+    job_information_df = pd.DataFrame(
+        job_information
     )
-
 
     st.dataframe(
         job_information_df,
         use_container_width=True,
         hide_index=True,
-
         column_config={
-
             "DBU Usage":
                 st.column_config
                 .NumberColumn(
                     "DBU Usage",
                     format="%.4f"
                 )
-
         }
     )
-
 
 else:
 
@@ -1193,43 +876,32 @@ else:
 
 
 # =========================================================
-# TABLE 2 - JOB RUN SUMMARY
+# JOB RUN SUMMARY
 # =========================================================
 
 st.subheader(
     "2️⃣ Job Run Summary"
 )
 
-
 run_summary = []
-
 
 for job in filtered_jobs:
 
-    job_id = (
-        job["job_id"]
-    )
+    job_id = job["job_id"]
 
-
-    job_name = (
-        job["job_name"]
-    )
-
+    job_name = job["job_name"]
 
     runs = get_job_runs(
         job_id
     )
 
-
     total_runs = len(
         runs
     )
 
-
     success_runs = 0
 
     failed_runs = 0
-
 
     # =====================================================
     # PROCESS RUNS
@@ -1244,34 +916,17 @@ for job in filtered_jobs:
             .upper()
         )
 
-
-        # -------------------------------------------------
-        # Successful
-        # -------------------------------------------------
-
         if status in [
-
             "SUCCESS",
-
             "SUCCEEDED"
-
         ]:
 
             success_runs += 1
 
-
-        # -------------------------------------------------
-        # Failed
-        # -------------------------------------------------
-
         elif status in [
-
             "FAILED",
-
             "ERROR",
-
             "TIMED_OUT"
-
         ]:
 
             failed_runs += 1
@@ -1286,16 +941,12 @@ for job in filtered_jobs:
         + failed_runs
     )
 
-
     if completed_runs > 0:
 
         success_ratio = (
-
             success_runs
             / completed_runs
-
         ) * 100
-
 
     else:
 
@@ -1303,13 +954,13 @@ for job in filtered_jobs:
 
 
     # =====================================================
-    # ADD ROW
+    # ADD SUMMARY ROW
     # =====================================================
 
     run_summary.append(
         {
             "Workspace Name":
-                job["workspace_name"],
+                WORKSPACE_NAME,
 
             "Job Name":
                 job_name,
@@ -1333,24 +984,20 @@ for job in filtered_jobs:
 
 
 # =========================================================
-# DISPLAY TABLE 2
+# DISPLAY RUN SUMMARY
 # =========================================================
 
 if run_summary:
 
-    run_summary_df = (
-        pd.DataFrame(
-            run_summary
-        )
+    run_summary_df = pd.DataFrame(
+        run_summary
     )
-
 
     st.dataframe(
         run_summary_df,
         use_container_width=True,
         hide_index=True
     )
-
 
 else:
 
@@ -1365,29 +1012,24 @@ else:
 
 st.divider()
 
-
 total_jobs = len(
     filtered_jobs
 )
-
 
 total_runs = sum(
     row["Total Runs"]
     for row in run_summary
 )
 
-
 successful_runs = sum(
     row["Success Runs"]
     for row in run_summary
 )
 
-
 failed_runs = sum(
     row["Failed Runs"]
     for row in run_summary
 )
-
 
 total_dbu = sum(
     row["DBU Usage"]
@@ -1446,13 +1088,11 @@ with col5:
 
 st.divider()
 
-
 st.caption(
     f"DBU Usage Period: "
     f"{USAGE_START_DATE} → "
     f"{USAGE_END_DATE}"
 )
-
 
 st.caption(
     "Cost calculation is currently disabled."
